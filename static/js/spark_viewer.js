@@ -1,7 +1,11 @@
-import * as THREE from "three";
+// import * as THREE from "three";
+import * as THREE from "https://cdnjs.cloudflare.com/ajax/libs/three.js/0.178.0/three.module.js";
+// import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.178.0/build/three.module.js';
 import { SplatMesh } from "@sparkjsdev/spark";
+// import { SplatMesh } from "https://sparkjs.dev/releases/spark/0.1.10/spark.module.js";
 import JSZip from "https://cdn.jsdelivr.net/npm/jszip@3.10.1/+esm";
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+// import { OrbitControls } from 'https://cdn.jsdelivr.net/npm/three@0.178.0/examples/jsm/controls/OrbitControls.js';
 
 const sparkContainer = document.getElementById("spark-viewer");
 const containerWidth = sparkContainer.offsetWidth;

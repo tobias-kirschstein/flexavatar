@@ -17,8 +17,16 @@
     <link rel="stylesheet"
           href="https://cdn.jsdelivr.net/gh/jpswalsh/academicons@1/css/academicons.min.css">
     <link rel="stylesheet" href="./static/css/index.css">
-    <link rel="stylesheet" href="./static/css/brush-canvas.css">
 
+    <script type="importmap">
+    {
+      "imports": {
+        "three": "https://cdnjs.cloudflare.com/ajax/libs/three.js/0.178.0/three.module.js",
+        "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.178.0/examples/jsm/",
+        "@sparkjsdev/spark": "https://sparkjs.dev/releases/spark/0.1.10/spark.module.js"
+      }
+    }
+    </script>
     <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.5.1/jquery.min.js"></script>
     <script
             src="https://code.jquery.com/color/jquery.color-2.2.0.min.js"
@@ -30,8 +38,6 @@
     <!--    <script src="https://unpkg.com/interactjs/dist/interact.min.js"></script>-->
     <script src="./static/js/interact.min.js"></script>
     <script src="./static/js/index.js"></script>
-
-    <script type="module" src="./static/js/brush_viewer.js"></script>
 </head>
 
 <body>
@@ -164,16 +170,6 @@
     </div>
 </section>
 
-<script type="importmap">
-    {
-      "imports": {
-        "three": "https://cdnjs.cloudflare.com/ajax/libs/three.js/0.178.0/three.module.js",
-        "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.178.0/examples/jsm/",
-        "@sparkjsdev/spark": "https://sparkjs.dev/releases/spark/0.1.10/spark.module.js"
-      }
-    }
-
-</script>
 <script type="module" src="./static/js/spark_viewer.js"></script>
 
 <section class="section">

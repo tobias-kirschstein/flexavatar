@@ -1,0 +1,373 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <meta charset="utf-8">
+    <meta name="description"
+          content="FlexAvatar: Learning Complete 3D Head Avatars with Partial Supervision">
+    <meta name="keywords"
+          content="FlexAvatar, 3D head avatar, single-image">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>FlexAvatar: Learning Complete 3D Head Avatars with Partial Supervision</title>
+
+    <link rel="stylesheet" href="./static/css/bulma.min.css">
+    <link rel="stylesheet" href="./static/css/bulma-carousel.min.css">
+    <link rel="stylesheet" href="./static/css/bulma-slider.min.css">
+    <link rel="stylesheet" href="./static/css/fontawesome.all.min.css">
+    <link rel="stylesheet"
+          href="https://cdn.jsdelivr.net/gh/jpswalsh/academicons@1/css/academicons.min.css">
+    <link rel="stylesheet" href="./static/css/index.css">
+    <link rel="stylesheet" href="./static/css/brush-canvas.css">
+
+    <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.5.1/jquery.min.js"></script>
+    <script
+            src="https://code.jquery.com/color/jquery.color-2.2.0.min.js"
+            integrity="sha256-aSe2ZC5QeunlL/w/7PsVKmV+fa0eDbmybn/ptsKHR6I="
+            crossorigin="anonymous"></script>
+    <script defer src="./static/js/fontawesome.all.min.js"></script>
+    <script src="./static/js/bulma-carousel.js"></script>
+    <script src="./static/js/bulma-slider.min.js"></script>
+    <!--    <script src="https://unpkg.com/interactjs/dist/interact.min.js"></script>-->
+    <script src="./static/js/interact.min.js"></script>
+    <script src="./static/js/index.js"></script>
+
+    <script type="module" src="./static/js/brush_viewer.js"></script>
+</head>
+
+<body>
+
+<!-- Title, Authors & Link Capsules -->
+<section class="hero section-title">
+    <!--    <div class="hero-body">-->
+    <div class="container is-max-desktop">
+        <div class="columns is-centered">
+            <div class="column has-text-centered">
+                <h1 class="title is-1 publication-title">
+                    <span class="ours-title">
+                    FlexAvatar
+                    </span>
+                    <br/>Learning Complete 3D Head Avatars with Partial Supervision
+                </h1>
+
+                <div class="is-size-5 publication-authors">
+                        <span class="author-block">
+                          <a href="https://tobias-kirschstein.github.io/"
+                             target="_blank">Tobias Kirschstein</a><sup>1</sup>,</span>
+                    <span class="author-block">
+                          <a href="https://simongiebenhain.github.io/" target="_blank">Simon Giebenhain</a><sup>1</sup>,
+                        </span>
+                    <span class="author-block">
+                          <a href="https://niessnerlab.org/" target="_blank">Matthias Nie&szlig;ner</a><sup>1</sup>
+                        </span>
+                </div>
+
+                <div class="is-size-5 publication-authors">
+                    <span class="author-block"><sup>1</sup>Technical University of Munich</span>
+                </div>
+
+                <!--                <div class="is-size-5 m-3"><strong>SIGGRAPH Asia 2024</strong></div>-->
+
+                <div class="column has-text-centered">
+                    <div class="publication-links">
+                        <!-- PDF Link. -->
+                        <span class="link-block">
+                                <a href="./static/GGHead_paper.pdf"
+                                   target="_blank"
+                                   class="external-link button is-normal is-rounded is-dark">
+                                  <span class="icon">
+                                      <i class="fas fa-file-pdf"></i>
+                                  </span>
+                                  <span>Paper</span>
+                                </a>
+                            </span>
+
+                        <span class="link-block">
+                                <a href="https://arxiv.org/abs/2406.09377"
+                                   target="_blank"
+                                   class="external-link button is-normal is-rounded is-dark">
+                                  <span class="icon">
+                                      <i class="ai ai-arxiv"></i>
+                                  </span>
+                                  <span>arXiv</span>
+                                </a>
+                            </span>
+
+                        <!-- Video Link. -->
+                        <span class="link-block">
+                                <a href="https://youtu.be/M5vq3DoZ7RI" target="_blank"
+                                   class="external-link button is-normal is-rounded is-dark">
+                                  <span class="icon">
+                                      <!-- "fas" means fa-brand -->
+                                      <i class="fab fa-youtube"></i>
+                                  </span>
+                                  <span>Video</span>
+                                </a>
+                            </span>
+
+                        <!-- Code Link. -->
+                        <span class="link-block">
+                                <a href="https://github.com/tobias-kirschstein/gghead" target="_blank"
+                                   class="external-link button is-normal is-rounded is-dark">
+                                  <span class="icon">
+                                      <i class="fab fa-github"></i>
+                                  </span>
+                                  <span>Code</span>
+                                  </a>
+                            </span>
+                    </div>
+
+                </div>
+            </div>
+        </div>
+        <!--        </div>-->
+    </div>
+</section>
+
+<!-- Dynamic 3DGS Viewer based on Spark -->
+<section id="avatar-viewer" class="hero teaser">
+    <div class="container is-max-desktop">
+        <div class="columns is-centered has-text-centered" style="margin-bottom:0; margin-top: 1px">
+            <div class="column is-four-fifths">
+                <strong>FlexAvatar</strong> creates <em>high-quality and complete 3D head avatars</em> from as few as a
+                <em>single input image</em>.
+            </div>
+        </div>
+        <br/>
+        <h2 class="title is-3 has-text-centered">Interactive 3D Avatar Viewer</h2>
+        <div class="columns is-centered">
+
+            <div class="column is-half">
+                <div class="is-square image">
+                    <div id="avatar-input-image-container">
+                        <img id="avatar-input-image"/>
+                    </div>
+                    <div id="avatar-input-image-text">Input Image</div>
+                </div>
+            </div>
+            <div class="column is-half">
+                <div class="is-square image">
+                    <div id="spark-viewer">
+                        <!-- Simple loading bar -->
+                        <div id="loading-bar-container">
+                            <span class="loading-bar-text">Loading...</span>
+                            <div id="loading-bar"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="columns is-centered">
+            <div id="avatar-selection">
+                <!-- will be filled by JavaScript -->
+            </div>
+        </div>
+    </div>
+</section>
+
+<script type="importmap">
+    {
+      "imports": {
+        "three": "https://cdnjs.cloudflare.com/ajax/libs/three.js/0.178.0/three.module.js",
+        "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.178.0/examples/jsm/",
+        "@sparkjsdev/spark": "https://sparkjs.dev/releases/spark/0.1.10/spark.module.js"
+      }
+    }
+
+</script>
+<script type="module" src="./static/js/spark_viewer.js"></script>
+
+<section class="section">
+    <!-- Abstract -->
+    <div class="container is-max-desktop">
+        <!-- Abstract. -->
+        <div class="columns is-centered has-text-centered">
+            <div class="column is-four-fifths">
+                <h2 class="title is-3">Abstract</h2>
+                <div class="content has-text-justified">
+                    <p>
+                        We introduce <strong>FlexAvatar</strong>, a method for creating high-quality and complete 3D
+                        head avatars from a single image.
+                        A core challenge lies in the limited availability of multi-view data and the tendency of
+                        monocular training to yield incomplete 3D head reconstructions.
+                        We identify the root cause of this issue as the entanglement between driving signal and target
+                        viewpoint when learning from monocular videos.
+                        To address this, we propose a transformer-based 3D portrait animation model with learnable data
+                        source tokens, so-called <em>bias sinks</em>, which enables unified training across monocular
+                        and multi-view datasets.
+                        This design leverages the strengths of both data sources during inference: strong generalization
+                        from monocular data and full 3D completeness from multi-view supervision.
+                        Furthermore, our training procedure yields a smooth latent avatar space that facilitates
+                        identity interpolation and flexible fitting to an arbitrary number of input observations.
+                    </p>
+                    <p>
+                        In extensive evaluations on single-view, few-shot, and monocular avatar creation tasks, we
+                        verify the efficacy of FlexAvatar.
+                        Many existing methods struggle with view extrapolation while FlexAvatar generates complete 3D
+                        head avatars with realistic facial animations.
+                    </p>
+                </div>
+            </div>
+        </div>
+        <!--/ Abstract. -->
+
+        <!-- Paper video. -->
+        <div class="columns is-centered has-text-centered">
+            <div class="column is-four-fifths">
+                <h2 class="title is-3">Video</h2>
+                <div class="publication-video">
+                    <iframe src="https://www.youtube.com/embed/M5vq3DoZ7RI" frameborder="0"
+                            allow="autoplay; encrypted-media" allowfullscreen></iframe>
+                </div>
+            </div>
+        </div>
+    </div>
+</section>
+
+<!-- Method -->
+<section class="section">
+    <div class="container is-max-desktop">
+        <div class="columns is-centered">
+            <div class="column is-full-width">
+                <h2 class="title is-3 has-text-centered">Method Overview</h2>
+                <img src="./static/images/flexavatar_method.jpg" width="100%"/>
+                <div class="content has-text">
+                    <p>
+                        <strong>FlexAvatar</strong> uses an encoder-decoder architecture to first encode a single image
+                        into a latent avatar code which is then decoded a 3D Gaussian Splatting representation for
+                        rendering.
+                        Once trained, the model provides control over both viewpoint <i>π</i> and facial expression <i>z<sub>exp</sub></i>.
+                    </p>
+
+                    <ol id="method-overview-list">
+                        <li>
+                            The transformer-based encoder <i>E</i> first produces a compressed avatar code <i>A</i> via
+                            cross-attention.
+                        </li>
+                        <li>
+                            The decoder <i>D</i> then incorporates the effect of the facial expression
+                            <i>z<sub>exp</sub></i> into the avatar representation.
+                        </li>
+                        <li>
+                            Crucially, the corresponding <em>bias sinks</em> are concatenated to the expression tokens:
+                            <i>z<sub>2D</sub></i> if the input image I comes from a monocular dataset, and
+                            <i>z<sub>3D</sub></i> if it comes from a multi-view dataset.
+                        </li>
+                        <li>
+                            Finally, the upsampled avatar code is decoded into the 3D Gaussian attributes for rendering.
+                        </li>
+                    </ol>
+                    During training, the bias sinks absorb data-modality specific biases such as the entanglement of
+                    driver expression and target viewpoint of monocular datasets. At inference time, only
+                    <i>z<sub>3D</sub></i> is
+                    used to inherit the disentangled behavior of multi-view datasets yielding both generalized and
+                    complete 3D head avatars.
+                </div>
+            </div>
+        </div>
+    </div>
+</section>
+
+<section class="section">
+    <div class="container is-max-desktop">
+        <div id="portrait-animation-results-carousel" class="carousel portrait-animation-results-carousel">
+            <div class="item">
+                <video autoplay controls muted loop playsinline height="100%">
+                    <source src="./static/videos/flexavatar_portrait_animation_comparison_1.mp4"
+                            type="video/mp4">
+                </video>
+            </div>
+            <div class="item">
+                <video controls muted loop playsinline height="100%">
+                    <source src="./static/videos/flexavatar_portrait_animation_comparison_1.mp4"
+                            type="video/mp4">
+                </video>
+            </div>
+            <div class="item">
+                <video autoplay controls muted loop playsinline height="100%">
+                    <source src="./static/videos/flexavatar_portrait_animation_comparison_3.mp4"
+                            type="video/mp4">
+                </video>
+            </div>
+            <div class="item">
+                <video controls muted loop playsinline height="100%">
+                    <source src="./static/videos/flexavatar_portrait_animation_comparison_4.mp4"
+                            type="video/mp4">
+                </video>
+            </div>
+        </div>
+        <div id="single-shot-results-carousel" class="carousel single-shot-results-carousel">
+            <div class="item">
+                <video autoplay controls muted loop playsinline height="100%">
+                    <source src="./static/videos/flexavatar_single_image_avatar_comparison_1.mp4"
+                            type="video/mp4">
+                </video>
+            </div>
+            <div class="item">
+                <video controls muted loop playsinline height="100%">
+                    <source src="./static/videos/flexavatar_single_image_avatar_comparison_2.mp4"
+                            type="video/mp4">
+                </video>
+            </div>
+        </div>
+        <div id="few-shot-results-carousel" class="carousel few-shot-results-carousel">
+            <div class="item">
+                <video autoplay controls muted loop playsinline height="100%">
+                    <source src="./static/videos/flexavatar_few_shot_avatar_comparison_1.mp4"
+                            type="video/mp4">
+                </video>
+            </div>
+            <div class="item">
+                <video controls muted loop playsinline height="100%">
+                    <source src="./static/videos/flexavatar_few_shot_avatar_comparison_2.mp4"
+                            type="video/mp4">
+                </video>
+            </div>
+        </div>
+    </div>
+</section>
+
+<!-- Related Links -->
+<!--<section id="gghead-related-links" class="hero">-->
+<!--    <div class="hero-body">-->
+<!--        <div class="container is-max-desktop">-->
+<!--            <h2 class="title is-3 has-text-centered">Related Links</h2>-->
+<!--            <ul>-->
+<!--                <li><a href="https://nvlabs.github.io/eg3d/">EG3D</a>: Our work builds on top of the excellent training-->
+<!--                    pipeline of EG3D and uses their visualizer-->
+<!--                </li>-->
+<!--                <li><a href="https://research.nvidia.com/labs/nxp/wysiwyg/">What You See Is What You GAN</a>: Another-->
+<!--                    state-of-the-art 3D GAN that does not need a 2D super-resolution network. Some of our visualizations-->
+<!--                    are inspired by their work.-->
+<!--                </li>-->
+<!--            </ul>-->
+<!--        </div>-->
+<!--    </div>-->
+<!--</section>-->
+
+<section class="section" id="BibTeX">
+    <div class="container is-max-desktop content">
+        <h2 class="title" style="text-align: center">BibTeX</h2>
+        <pre><code>Todo</code></pre>
+    </div>
+</section>
+
+
+</body>
+
+<footer class="footer">
+    <div class="container">
+        <div class="columns">
+            <div class="column is-full-width">
+                <div class="content has-text-centered">
+                    <p>
+                        Website inspired by <a href="https://keunhong.com/">Keunhong Park</a>'s <a
+                            href="https://nerfies.github.io/">Nerfies website</a>.
+                    </p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+</footer>
+
+</html>

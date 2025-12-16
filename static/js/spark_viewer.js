@@ -14,8 +14,10 @@ const containerHeight = sparkContainer.offsetHeight;
 const loadingBarContainer = document.getElementById("loading-bar-container");
 const loadingBar = document.getElementById("loading-bar");
 
-const camera = new THREE.PerspectiveCamera(45, containerWidth / containerHeight, 0.1, 1000);
-camera.position.set(0, 0, 0.4);
+// const camera = new THREE.PerspectiveCamera(45, containerWidth / containerHeight, 0.1, 1000);
+const camera = new THREE.PerspectiveCamera(20, containerWidth / containerHeight, 0.1, 1000);
+// camera.position.set(0, 0, 0.4);
+camera.position.set(0, 0, 0.95);
 const renderer = new THREE.WebGLRenderer();
 renderer.setSize(containerWidth, containerHeight);
 sparkContainer.appendChild(renderer.domElement)
@@ -126,8 +128,8 @@ window.loadAvatar = loadAvatar;
 // Setup mouse controls to orbit the camera around
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.target.set(0, 0, -0.05);
-controls.minDistance = 0.3;
-controls.maxDistance = 0.7;
+controls.minDistance = 0.5;
+controls.maxDistance = 1.1;
 controls.enablePan = false;
 controls.update();
 
@@ -135,7 +137,7 @@ let frameIndex = 0;
 const frameDuration = 1000 / 30; // ~30 FPS
 let lastFrameTime = 0;
 
-loadAvatar("chatty-art-african_woman-3D_marble_sculpture");
+loadAvatar("chatty-art-black_girl-holzstift_white_bg");
 renderer.setAnimationLoop((time) => {
     if (frames.length > 1 && (time - lastFrameTime) > frameDuration) {
         // hide old frame

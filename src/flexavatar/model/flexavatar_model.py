@@ -173,8 +173,6 @@ class HeadTransformer(nn.Module):
 
     def forward(self, x: torch.Tensor,
                 condition: Optional[torch.Tensor] = None,
-                input_cam2worlds: Optional[List[List[Pose]]] = None,
-                input_intrinsics: Optional[List[List[Intrinsics]]] = None,
                 expression_codes: Optional[torch.Tensor] = None,
                 dataset_ids: Optional[torch.Tensor] = None,
                 cached_internal_representations: Optional[torch.Tensor] = None,
@@ -626,17 +624,9 @@ class GaussianHeadLRMConfig(Config):
     n_layers_encoder: int
     n_input_views: int = 1
     use_feature_projection: bool = False
-    add_features_before_encoder: bool = False
     feature_dim: int = 1536
     use_bfloat16: bool = False
-    no_color_clamp: bool = False
-    compute_headpose_sh: bool = False
-    normalize_images: bool = False
-    encode_images_separately: bool = False
-    residual_downsample: int = 4  # Ensure target images cannot leak too much by forcing downsampling
-    n_layers_residual_encoder: int = 4
     use_plucker: bool = False
-    use_rppc: bool = False  # Reference-Point Plucker Coordinates
 
     compile: bool = False
     use_gsplat: bool = False
@@ -684,7 +674,7 @@ class GaussianHeadLRM(nn.Module):
                 n_head=config.head_transformer.transformer.n_heads,
                 n_embd=config.head_transformer.transformer.d_hidden,
                 use_post_layer_norm=True,
-                n_merged_views=1 if config.encode_images_separately else config.n_input_views,
+                n_merged_views=config.n_input_views,
                 use_causal_attention=config.head_transformer.transformer.use_causal_attention,
                 patch_size=config.patch_size
             )
@@ -748,7 +738,7 @@ class GaussianHeadLRM(nn.Module):
 
                 if self._config.use_plucker:
                     input_plucker_embeddings = plucker_embedder(input_cam2worlds, input_intrinsics, H, W, x.device, offset=False,
-                                                                use_rppc=self._config.use_rppc)
+                                                                use_rppc=False)
                     x = torch.cat([x, input_plucker_embeddings], dim=2)
 
                 x = x.flatten(0, 1)
@@ -790,35 +780,19 @@ class GaussianHeadLRM(nn.Module):
 
                     return x
 
-                if self._config.use_feature_projection and self._config.add_features_before_encoder and features is not None:
-                    x = rearrange(x, 'b v c h w -> (v h w) b c')
-                    x = add_image_features(x)
-                    x = rearrange(x, '(v h w) b c -> b v c h w', v=V, h=H_p, w=W_p)
-
                 # encode image tokens
-                xs = [x]
+                x = rearrange(x, 'b v c h w -> (v h w) b c')
+                x = self._transformer_encoder(x)
 
-                if self._config.encode_images_separately:
-                    xs = [rearrange(x, 'b v c h w -> (h w) (b v) c') for x in xs]
-                else:
-                    xs = [rearrange(x, 'b v c h w -> (v h w) b c') for x in xs]
-
-                x = self._transformer_encoder(xs[0])
-
-                if self._config.encode_images_separately:
-                    x = rearrange(x, '(h w) (b v) c -> (v h w) b c', h=H_p, w=W_p, b=B, v=V)
-
-                if self._config.use_feature_projection and not self._config.add_features_before_encoder and features is not None:
+                if self._config.use_feature_projection and features is not None:
                     x = add_image_features(x)
             else:
                 x = None
 
             # Run cross-attention
             x, pixel_aligned_predictions, internal_representations, vae_output = self._head_transformer(
-                x, condition=condition, input_cam2worlds=input_cam2worlds,
-                input_intrinsics=input_intrinsics,
+                x, condition=condition,
                 expression_codes=expression_codes,
-                residual_codes=residual_codes,
                 dataset_ids=dataset_ids,
                 cached_internal_representations=cached_internal_representations,
                 only_internal_representations=only_internal_representations)
@@ -901,24 +875,11 @@ class GaussianHeadLRM(nn.Module):
                     gaussian_model = gaussian_model_list[v]
                 render_cam = pose_to_rendercam(batch.render_cam2world_poses[i][v], batch.render_intrinsics[i][v], img_w, img_h)
                 override_color = None
-                if self._config.no_color_clamp or self._config.gaussian_decoder.use_variance_channels:
+                if self._config.gaussian_decoder.use_variance_channels:
                     override_color = gaussian_model._features_dc[:, 0]
-                    if self._config.gaussian_decoder.use_variance_channels and not self._config.no_color_clamp:
-                        override_color = torch.cat([
-                            torch.clamp_min(override_color[..., :self._config.gaussian_decoder.n_channels_color] + 0.5, 0.0),
-                            override_color[..., self._config.gaussian_decoder.n_channels_color:]], dim=1)
-                        # override_color[..., :self._config.gaussian_decoder.n_channels_color] = torch.clamp_min(
-                        #     override_color[..., :self._config.gaussian_decoder.n_channels_color] + 0.5, 0.0)
-                elif self._config.compute_headpose_sh:
-                    world2model_pose = batch.render_head_poses[i][v].invert()
-                    world_location = torch.tensor(world2model_pose.get_translation(), device=self.device)
-                    C = gaussian_model._features_dc.shape[2]
-                    shs_view = gaussian_model.get_features.transpose(1, 2).view(-1, C, (self._config.gaussian_decoder.sh_degree + 1) ** 2)
-                    dir_pp = gaussian_model.get_xyz - world_location[None]
-                    dir_pp_normalized = dir_pp / dir_pp.norm(dim=1, keepdim=True)
-                    sh2rgb = eval_sh(self._config.gaussian_decoder.sh_degree, shs_view, dir_pp_normalized)
-                    override_color = torch.clamp_min(sh2rgb + 0.5, 0.0)
-
+                    override_color = torch.cat([
+                        torch.clamp_min(override_color[..., :self._config.gaussian_decoder.n_channels_color] + 0.5, 0.0),
+                        override_color[..., self._config.gaussian_decoder.n_channels_color:]], dim=1)
                 if use_gsplat:
                     all_gaussian_models.append(gaussian_model)
                     all_render_cams.append(render_cam)
@@ -932,11 +893,6 @@ class GaussianHeadLRM(nn.Module):
                     #                        override_color=override_color)  # TamingGS apparently has some issue with back-propagating color when SHs are computed in CUDA...
 
                     rendered_image = render_output['render']
-
-                    if self._config.normalize_images:
-                        # [0, 1] -> [-1, 1]
-                        rendered_image[:self._config.gaussian_decoder.n_channels_color] = rendered_image[
-                                                                                          :self._config.gaussian_decoder.n_channels_color] * 2 - 1
 
                     if self._config.gaussian_decoder.use_variance_channels and self._config.gaussian_decoder.init_zero_variance:
                         # Variance prediction

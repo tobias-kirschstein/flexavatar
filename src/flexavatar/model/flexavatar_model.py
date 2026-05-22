@@ -87,10 +87,7 @@ class RenderingOutput:
 class GaussianModelsOutput:
     gaussian_models: List[List[GaussianModel]]
     gaussian_predictions: Optional[Dict[str, torch.Tensor]] = None
-    x_repa: Optional[torch.Tensor] = None
     internal_representations: Optional[torch.Tensor] = None
-    residual_codes: Optional[torch.Tensor] = None
-    vae_output: Optional = None
 
 
 @dataclass
@@ -186,16 +183,14 @@ class HeadTransformer(nn.Module):
             n_dataset_ids = 2
             self._dataset_embedding = nn.Embedding(n_dataset_ids, config.transformer.d_hidden)
 
-        # nn.init.trunc_normal_(self._head_token_embeddings, std=0.02)
         nn.init.trunc_normal_(self._head_token_embeddings)
 
     def forward(self, x: torch.Tensor,
-                condition: Optional[torch.Tensor] = None,
                 expression_codes: Optional[torch.Tensor] = None,
                 dataset_ids: Optional[torch.Tensor] = None,
                 cached_internal_representations: Optional[torch.Tensor] = None,
                 only_internal_representations: bool = False,
-                ) -> Union[torch.Tensor, torch.Tensor, torch.Tensor]:
+                ) -> Union[torch.Tensor, torch.Tensor]:
 
         if cached_internal_representations is None:
             B = x.shape[1]
@@ -205,45 +200,29 @@ class HeadTransformer(nn.Module):
                 queries = self._query_point_embedder(self._initial_head_xyz).permute(1, 0, 2).repeat(1, B, 1).to(x.dtype)
             else:
                 queries = self._head_token_embeddings.repeat(1, B, 1).to(x.dtype)
-            pixel_aligned_predictions = None
-
-            if condition is not None and len(condition.shape) == 3:
-                # TODO: Decoder cannot really make use of timestep condition of multiple input images. Hence, only using the condition of the first timestep here
-                condition = condition[:, 0]
 
             if self._config.cross_attention_type == CrossAttentionType.Q2K:
-                x = self._transformer(queries, keys=x, condition=condition)
+                x = self._transformer(queries, keys=x)
             elif self._config.cross_attention_type == CrossAttentionType.Q2QK:
                 qk = torch.cat([queries, x], dim=0)
-                x = self._transformer(queries, keys=qk, condition=condition)
+                x = self._transformer(queries, keys=qk)
             elif self._config.cross_attention_type == CrossAttentionType.QK2QK:
                 qk = torch.cat([queries, x], dim=0)
-                x = self._transformer(qk, condition=condition)
-                pixel_aligned_predictions = x[len(queries):]
+                x = self._transformer(qk)
                 x = x[:len(queries)]
             else:
                 raise ValueError(f"Unknown cross attention type: {self._config.cross_attention_type}")
-
         else:
             x = cached_internal_representations[:self._head_token_embeddings.shape[0]]
-            pixel_aligned_predictions = cached_internal_representations[self._head_token_embeddings.shape[0]:]
-            if pixel_aligned_predictions.shape[0] == 0:
-                pixel_aligned_predictions = None
-
-        if pixel_aligned_predictions is not None:
-            x = torch.cat([x, pixel_aligned_predictions])
-
-        vae_output = None
 
         internal_representation = x
 
         if only_internal_representations:
-            return x, pixel_aligned_predictions, internal_representation, vae_output
+            return x, internal_representation
 
         B = x.shape[1]
 
         if self._config.d_expression_codes is not None:
-
             if self._config.n_expression_tokens is None:
                 expression_tokens = self._expression_mlp(expression_codes).flatten(0, 1)
             else:
@@ -254,8 +233,6 @@ class HeadTransformer(nn.Module):
 
             # Duplicate internal 3D representation for each expression code -> there will be separate GaussianModels for each expression code
             x = x.repeat_interleave(expression_codes.shape[1], dim=1)
-            if condition is not None:
-                condition = condition.repeat_interleave(expression_codes.shape[1], dim=0)
 
             if self._config.use_dataset_ids:
                 dataset_tokens = self._dataset_embedding(dataset_ids)
@@ -264,84 +241,9 @@ class HeadTransformer(nn.Module):
                 expression_tokens = torch.cat([dataset_tokens, expression_tokens], dim=0)
 
         if self._config.d_expression_codes:
-            x = self._expression_transformer(x, keys=expression_tokens, condition=condition)
-            if pixel_aligned_predictions is not None:
-                pixel_aligned_predictions = x[-len(pixel_aligned_predictions):]
-                x = x[:-len(pixel_aligned_predictions)]
+            x = self._expression_transformer(x, keys=expression_tokens)
 
-        return x, pixel_aligned_predictions, internal_representation, vae_output
-
-
-def unproject_depth(depth_map, fxfycxcy, c2w):
-    """
-    Unproject depth to 3D space (world coordinate).
-    """
-    B, N, H, W = depth_map.shape
-    depth_map = depth_map.reshape(B * N, H, W)
-    # fxfycxcy = fxfycxcy.reshape(-1, fxfycxcy.shape[-1])
-    K = fxfycxcy.view(B * N, 3, 3)
-    # K = torch.zeros(B * N, 3, 3, device=depth_map.device)
-    # K[:, 0, 0] = fxfycxcy[:, 0]
-    # K[:, 1, 1] = fxfycxcy[:, 1]
-    # K[:, 0, 2] = fxfycxcy[:, 2]
-    # K[:, 1, 2] = fxfycxcy[:, 3]
-    # K[:, 2, 2] = 1
-    c2w = c2w.reshape(B * N, 4, 4)
-    y, x = torch.meshgrid(torch.arange(H), torch.arange(W))
-    y = y.to(depth_map.device).unsqueeze(0).repeat(B * N, 1, 1) / (H - 1)
-    x = x.to(depth_map.device).unsqueeze(0).repeat(B * N, 1, 1) / (W - 1)
-    xy_map = torch.stack([x, y], axis=-1) * depth_map[..., None]
-    xyz_map = torch.cat([xy_map, depth_map[..., None]], axis=-1)
-    xyz = xyz_map.view(B * N, -1, 3)
-
-    # get point positions in camera coordinate
-    fx = K[..., 0, 0]
-    fy = K[..., 1, 1]
-    cx = K[..., 0, 2]
-    cy = K[..., 1, 2]
-    K_inv = torch.eye(3, device=depth_map.device, dtype=depth_map.dtype).repeat(B * N, 1, 1)
-    K_inv[..., 0, 0] = 1 / fx
-    K_inv[..., 1, 1] = 1 / fy
-    K_inv[..., 0, 2] = -1 * cx / fx
-    K_inv[..., 1, 2] = -1 * cy / fy
-    xyz = torch.matmul(xyz, torch.transpose(K_inv, -1, -2))
-    xyz_map = xyz.view(B * N, H, W, 3)
-
-    # transform pts from camera to world coordinate
-    xyz_homo = torch.ones((B * N, H, W, 4), device=depth_map.device)
-    xyz_homo[..., :3] = xyz_map
-    xyz_world = torch.bmm(c2w, xyz_homo.reshape(B * N, -1, 4).permute(0, 2, 1)).permute(
-        0, 2, 1)[..., :3].reshape(B, N * H * W, 3)
-    return xyz_world
-
-
-def get_unprojected_points(input_cam2worlds: Optional[List[List[Pose]]],
-                           input_intrinsics: Optional[List[List[Intrinsics]]],
-                           resolution: int,
-                           dtype: torch.dtype,
-                           device: torch.device,
-                           predicted_depth: Optional[torch.Tensor] = None):
-    B = len(input_cam2worlds)
-    input_c2ws = torch.tensor(np.stack(input_cam2worlds), dtype=dtype, device=device)
-    input_intr = torch.tensor(np.stack(input_intrinsics), dtype=dtype, device=device)
-    V = input_c2ws.shape[1]
-    ray_o = input_c2ws[:, :, :3, 3]
-    res_aligned = resolution
-    depth_offset = torch.norm(ray_o, dim=-1, p=2, keepdim=True)
-    depth_init = depth_offset.repeat(1, 1, res_aligned ** 2)
-    depth_init = depth_init.reshape(B, V, res_aligned, res_aligned)
-
-    if predicted_depth is not None:
-        VT = predicted_depth.shape[0] // B
-        depth_init = depth_init.repeat_interleave(VT, dim=0) + predicted_depth.reshape(B * VT, V, res_aligned,
-                                                                                       res_aligned)  # TODO: Probably won't work with more n_gaussians_per_token
-        # If we created separate 3D representations for each target view (e.g., due to expression change), need to repeat input poses/intrinsics for each output view
-        input_intr = input_intr.repeat_interleave(VT, dim=0)
-        input_c2ws = input_c2ws.repeat_interleave(VT, dim=0)
-
-    xyz_init = unproject_depth(depth_init, input_intr, input_c2ws)
-
-    return xyz_init
+        return x, internal_representation
 
 
 class GaussianDecoder(nn.Module):
@@ -500,17 +402,10 @@ class GaussianDecoder(nn.Module):
 
     def forward(self,
                 x: torch.Tensor,
-                pixel_aligned_predictions: Optional[torch.Tensor] = None,
-                input_cam2worlds: Optional[List[List[Pose]]] = None,
-                input_intrinsics: Optional[List[List[Intrinsics]]] = None,
-                input_images: Optional[torch.Tensor] = None,
-                only_mesh_gaussians: bool = False,
-                only_pixel_aligned_gaussians: bool = False,
-                return_uv_attributes: bool = False,
-                expression_codes: Optional[torch.Tensor] = None) -> Tuple[List[GaussianModel], Dict[str, torch.Tensor]]:
+                return_uv_attributes: bool = False) -> Tuple[List[GaussianModel], Dict[str, torch.Tensor]]:
 
         if self._config.use_gaussians:
-            use_mesh_gaussians = self._config.use_head_tokens and not only_pixel_aligned_gaussians
+            use_mesh_gaussians = self._config.use_head_tokens
             B, HT, C = x.shape
             gaussian_predictions = dict()
             if use_mesh_gaussians:
@@ -544,18 +439,6 @@ class GaussianDecoder(nn.Module):
                 else:
                     gaussian_model._features_rest = colors_sh[i]
                 gaussian_models.append(gaussian_model)
-
-        else:
-            b, v, c, h, w = pixel_aligned_predictions.shape
-            pixel_aligned_predictions = rearrange(pixel_aligned_predictions, 'b v c h w -> (b v) c h w')
-            pixel_aligned_predictions = self._upsample_feature_map(pixel_aligned_predictions,
-                                                                   perform_sampling=False)  # [B*E, V*H*W, D]
-            pixel_aligned_predictions = self._mlp_decoder(pixel_aligned_predictions)
-            pixel_aligned_predictions = self._out_activation(pixel_aligned_predictions)
-            gaussian_models = rearrange(pixel_aligned_predictions, '(b v) (h w) c -> b v c h w', v=v,
-                                        h=h * self._config.upscale_uv_texture * self._config.oversampling_factor,
-                                        w=w * self._config.upscale_uv_texture * self._config.oversampling_factor)
-            gaussian_predictions = dict()
 
         gaussian_predictions['all_positions'] = positions
         gaussian_predictions['all_scales'] = scales
@@ -706,27 +589,21 @@ class GaussianHeadLRM(nn.Module):
                 x = None
 
             # Run cross-attention
-            x, pixel_aligned_predictions, internal_representations, vae_output = self._head_transformer(
-                x, condition=condition,
+            x, internal_representations = self._head_transformer(
+                x,
                 expression_codes=expression_codes,
                 dataset_ids=dataset_ids,
                 cached_internal_representations=cached_internal_representations,
                 only_internal_representations=only_internal_representations)
 
             if only_internal_representations:
-                return GaussianModelsOutput(None, None, x_repa, internal_representations, vae_output)
+                return GaussianModelsOutput(None, None, internal_representations)
 
             x = rearrange(x, 'g b c -> b g c')
-            if pixel_aligned_predictions is not None:
-                pixel_aligned_predictions = rearrange(pixel_aligned_predictions, '(v h w) b c -> b v c h w', v=V, h=H_p, w=W_p)
 
             # Decode into Gaussian Attributes
 
-            gaussian_models, gaussian_predictions = self._gaussian_decoder(
-                x, pixel_aligned_predictions,
-                input_cam2worlds=input_cam2worlds, input_intrinsics=input_intrinsics, input_images=images,
-                only_mesh_gaussians=only_mesh_gaussians, only_pixel_aligned_gaussians=only_pixel_aligned_gaussians,
-                return_uv_attributes=return_uv_attributes, expression_codes=expression_codes)
+            gaussian_models, gaussian_predictions = self._gaussian_decoder(x, return_uv_attributes=return_uv_attributes)
 
         if self._config.gaussian_decoder.use_gaussians:
             if self._config.use_bfloat16:
@@ -737,20 +614,16 @@ class GaussianHeadLRM(nn.Module):
                     gaussian_model._features_dc = gaussian_model._features_dc.to(torch.float32)
                     gaussian_model._features_rest = gaussian_model._features_rest.to(torch.float32)
                     gaussian_model._opacity = gaussian_model._opacity.to(torch.float32)
-            # bfloat16_caster.__exit__(None, None, None)
 
-            gaussian_models_per_person = []  # Each person can have multiple gaussian models for the individual expressions
             if expression_codes is None:
                 gaussian_models_per_person = [[gaussian_model] for gaussian_model in gaussian_models]
             else:
                 VT = expression_codes.shape[1]
                 gaussian_models_per_person = [gaussian_models[i * VT: (i + 1) * VT] for i in range(B)]
 
-            gaussian_models_output = GaussianModelsOutput(gaussian_models_per_person, gaussian_predictions, x_repa,
-                                                          internal_representations=internal_representations, vae_output=vae_output)
+            gaussian_models_output = GaussianModelsOutput(gaussian_models_per_person, gaussian_predictions, internal_representations=internal_representations)
         else:
-            gaussian_models_output = GaussianModelsOutput(gaussian_models, gaussian_predictions, x_repa,
-                                                          internal_representations=internal_representations, vae_output=vae_output)
+            gaussian_models_output = GaussianModelsOutput(gaussian_models, gaussian_predictions, internal_representations=internal_representations)
 
         return gaussian_models_output
 

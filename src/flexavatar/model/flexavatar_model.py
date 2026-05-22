@@ -1,18 +1,16 @@
 import platform
 from dataclasses import dataclass, replace
-from enum import auto
 from math import sqrt
 from typing import Optional, List, Tuple, Union, Dict
 
 import numpy as np
 import torch
 from dreifus.camera import PoseType
-from dreifus.image import torch_to_numpy_img
 from dreifus.matrix import Pose, Intrinsics
 from dreifus.render import project
 from dreifus.vector import Vec3
 from einops import rearrange
-from elias.config import Config, StringEnum
+from elias.config import Config
 from gaussian_splatting.arguments import PipelineParams2
 from gaussian_splatting.gaussian_renderer import render_distwar, render_gsplat_batched
 from gaussian_splatting.scene import GaussianModel
@@ -20,6 +18,7 @@ from gaussian_splatting.scene.cameras import pose_to_rendercam
 from gaussian_splatting.utils.sh_utils import C0, eval_sh
 
 from flexavatar.config.dataset_config import DATASET_ID_MAPPING, GaussianHeadLRMBatch, MVDatasetConfig
+from flexavatar.config.flexavatar_config import HeadTransformerConfig, HeadTransformerType, CrossAttentionType, TransformerConfig
 from flexavatar.env import ASSETS_PATH
 from flexavatar.model.flexavatar_preprocessor import GaussianHeadLRMPreprocessor
 from flexavatar.model.lam_gs_layer import GSLayer
@@ -35,18 +34,6 @@ from torch.nn.functional import interpolate
 from torch.nn.modules.module import T
 from torchvision.ops import MLP
 from trimesh import load_mesh
-
-
-@dataclass
-class TransformerConfig(Config):
-    n_layers: int
-    d_hidden: int
-    n_heads: int
-    use_custom_attention: bool = False
-    use_qk_norm: bool = False
-    use_layer_norm_keys: bool = False
-    use_alternating_self_attention: bool = False
-    use_causal_attention: bool = True
 
 
 class Transformer(nn.Module):
@@ -129,61 +116,6 @@ def sample_template_positions(resolution: int, template_name: str = 'gghead_temp
     uv_samples = uv_samples[0, :, 0]
 
     return sampled_positions, uv_samples, torch_position_map.permute(1, 2, 0)
-
-
-class HeadTransformerType(StringEnum):
-    MESH_TOKENS = auto()
-    UV_TEXTURE = auto()
-
-
-class CrossAttentionType(StringEnum):
-    Q2K = auto()
-    Q2QK = auto()
-    QK2QK = auto()
-
-
-@dataclass
-class HeadTransformerConfig(Config):
-    transformer: TransformerConfig
-    res_head_tokens: int
-    head_transformer_type: HeadTransformerType = HeadTransformerType.MESH_TOKENS
-    cross_attention_type: CrossAttentionType = CrossAttentionType.Q2K
-    use_lam_transformer: bool = False
-    use_lam_point_embedder: bool = False
-    use_gpt: bool = False  # remove
-    use_adaptive_layer_norm: bool = False  # remove
-    init_adaptive_layer_norm_identity: bool = False  # remove
-    res_image_tokens: Optional[int] = None
-    n_input_views: int = 1
-    use_image_token_embeddings: bool = False
-    use_pixel_aligned_gaussians: bool = False  # remove
-    use_repa: bool = False
-    repa_layer: int = -1
-    d_repa_target: int = 768
-    use_backprojected_xyz_input: bool = False
-    use_head_xyz_input: bool = False
-    block_size_estimate_version: int = 1
-    use_ln_before_transformer: bool = False
-    use_transformer_encoder_ln: bool = True
-    use_transformer_decoder_ln: bool = True
-    d_expression_codes: Optional[int] = None
-    n_expression_tokens: Optional[int] = 4
-    d_residual_codes: Optional[int] = None
-    n_residual_tokens: Optional[int] = None
-    use_head_tokens: bool = True
-    n_layers_expression_transformer: int = 4
-    use_vae: bool = False  # remove
-    use_point_generator: bool = False  # remove
-    n_point_generator_layers: int = 6
-    use_dataset_ids: bool = False
-    use_separate_dataset_ids: bool = False
-    use_nersemble_dataset_ids: bool = False
-    head_template: str = 'gghead_template'
-
-    use_representation_compressor: bool = False
-    n_compression_steps: int = 3
-    n_layers_per_compression: int = 1
-    use_learnable_compression_queries: bool = False
 
 
 class HeadTransformer(nn.Module):

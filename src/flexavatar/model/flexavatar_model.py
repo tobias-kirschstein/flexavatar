@@ -33,47 +33,70 @@ from torchvision.ops import MLP
 from trimesh import load_mesh
 
 
-class Transformer(nn.Module):
+@dataclass
+class GaussianDecoderConfig(Config):
+    n_gaussians_per_token: int
+    res_head_tokens: int
+    d_hidden: int
+    n_mlp_layers: int
+    scale_offset: float
+    scale_max: float
+    scale_min: float = -40
+    position_range: float = 0.4
+    res_uv_texture: int = 256
+    res_image_tokens: Optional[int] = None
+    upscale_uv_texture: Optional[int] = None
+    head_transformer_type: HeadTransformerType = HeadTransformerType.MESH_TOKENS
+    use_stylegan_pixelshuffle_upsampler: bool = False
+    use_norm_before_mlp: bool = True
+    initialize_with_image: bool = False
+    n_channels_color: int = 3
+    fix_mlp_order: bool = False
+    use_head_tokens: bool = True
+    oversampling_factor: int = 1  # By how much generated (uv)-textures should be oversampled to spawn Gaussians
+    use_lam_gs_decoder: bool = False
+    use_gaussians: bool = True  # If False, simply decode 1 pixel value per pixel_aligned_token
+    sh_degree: int = 0
+    head_template: str = 'gghead_template'
+    d_expression_codes: Optional[int] = None
 
-    def __init__(self, config: TransformerConfig):
-        super().__init__()
-        self._config = config
+@dataclass
+class GaussianHeadLRMConfig(Config):
+    head_transformer: HeadTransformerConfig
+    gaussian_decoder: GaussianDecoderConfig
+    patch_size: int
+    in_channels: int
+    n_layers_encoder: int
+    n_input_views: int = 1
+    use_feature_projection: bool = False
+    feature_dim: int = 1536
+    use_bfloat16: bool = False
+    use_plucker: bool = False
 
-        attention_layers = []
-        for _ in range(config.n_layers):
-            attention_layers.append(ResidualAttentionBlock(config.d_hidden,
-                                                           config.n_heads,
-                                                           use_custom_attention=config.use_custom_attention,
-                                                           use_qk_norm=config.use_qk_norm))
-        self._attention_layers = nn.ModuleList(attention_layers)
+    compile: bool = False
+    use_gsplat: bool = False
 
-        self_attention_layers = []
-        if config.use_alternating_self_attention:
-            for _ in range(config.n_layers):
-                self_attention_layers.append(ResidualAttentionBlock(config.d_hidden,
-                                                                    config.n_heads,
-                                                                    use_custom_attention=config.use_custom_attention,
-                                                                    use_qk_norm=config.use_qk_norm))
-        self._self_attention_layers = nn.ModuleList(self_attention_layers)
 
-        if config.use_layer_norm_keys:
-            self._layer_norm_keys = LayerNorm(config.d_hidden)
+@dataclass
+class RenderingOutput:
+    rendered_images: torch.Tensor  # [B, TV, C, H, W]
+    rendered_raw_images: Optional[torch.Tensor] = None
 
-    def forward(self, x: torch.Tensor, keys: Optional[torch.Tensor] = None) -> torch.Tensor:
-        if self._config.use_layer_norm_keys and keys is not None:
-            keys = self._layer_norm_keys(keys)
 
-        if self._config.use_alternating_self_attention:
-            for attention_layer, self_attention_layer in zip(self._attention_layers, self._self_attention_layers):
-                x = attention_layer(x, keys=keys)
-                x = self_attention_layer(x)
+@dataclass
+class GaussianModelsOutput:
+    gaussian_models: List[List[GaussianModel]]
+    gaussian_predictions: Optional[Dict[str, torch.Tensor]] = None
+    x_repa: Optional[torch.Tensor] = None
+    internal_representations: Optional[torch.Tensor] = None
+    residual_codes: Optional[torch.Tensor] = None
+    vae_output: Optional = None
 
-        else:
-            for attention_layer in self._attention_layers:
-                x = attention_layer(x, keys=keys)
 
-        return x
-
+@dataclass
+class GaussianHeadLRMOutput:
+    gaussian_models_output: GaussianModelsOutput
+    rendering_output: RenderingOutput
 
 def sample_template_positions(resolution: int, template_name: str = 'gghead_template') -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     template_mesh = load_mesh(f"{ASSETS_PATH}/{template_name}.obj")
@@ -142,9 +165,7 @@ class HeadTransformer(nn.Module):
             self._transformer = TransformerDecoder('sd3_cond', config.transformer.n_layers, config.transformer.n_heads, config.transformer.d_hidden,
                                                    cond_dim=config.transformer.d_hidden,
                                                    use_ada_ln=False,
-                                                   transform_keys=False)  # TODO: cond_dim could be different
-        else:
-            self._transformer = Transformer(config.transformer)
+                                                   transform_keys=False)
 
         if config.d_expression_codes is not None:
             self._expression_mlp = MLP(config.d_expression_codes,
@@ -159,10 +180,7 @@ class HeadTransformer(nn.Module):
                                                                   config.transformer.d_hidden,
                                                                   cond_dim=config.transformer.d_hidden,
                                                                   use_ada_ln=False,
-                                                                  transform_keys=False)  # TODO: cond_dim could be different
-
-            else:
-                self._expression_transformer = Transformer(config.transformer)
+                                                                  transform_keys=False)
 
         if self._config.use_dataset_ids:
             n_dataset_ids = 2
@@ -326,50 +344,12 @@ def get_unprojected_points(input_cam2worlds: Optional[List[List[Pose]]],
     return xyz_init
 
 
-@dataclass
-class GaussianDecoderConfig(Config):
-    n_gaussians_per_token: int
-    res_head_tokens: int
-    d_hidden: int
-    n_mlp_layers: int
-    scale_offset: float
-    scale_max: float
-    scale_min: float = -40
-    position_range: float = 0.4
-    res_uv_texture: int = 256
-    res_image_tokens: Optional[int] = None
-    upscale_uv_texture: Optional[int] = None
-    head_transformer_type: HeadTransformerType = HeadTransformerType.MESH_TOKENS
-    use_stylegan_pixelshuffle_upsampler: bool = False
-    sample_aligned_gaussians: bool = False
-    use_norm_before_mlp: bool = True
-    initialize_with_image: bool = False
-    n_channels_color: int = 3
-    use_variance_channels: bool = False
-    fix_mlp_order: bool = False
-    use_color_skip: bool = False
-    init_zero_color: bool = False
-    init_zero_variance: bool = False
-    use_variance_activation: bool = False
-    predict_depth: bool = False
-    use_separate_mlp_decoder: bool = False
-    use_head_tokens: bool = True
-    oversampling_factor: int = 1  # By how much generated (uv)-textures should be oversampled to spawn Gaussians
-    use_lam_gs_decoder: bool = False
-    use_gaussians: bool = True  # If False, simply decode 1 pixel value per pixel_aligned_token
-    use_vae: bool = False
-    make_contiguous: bool = False
-    sh_degree: int = 0
-    head_template: str = 'gghead_template'
-    d_expression_codes: Optional[int] = None
-
-
 class GaussianDecoder(nn.Module):
     def __init__(self, config: GaussianDecoderConfig):
         super().__init__()
         self._config = config
 
-        self._n_color_channels = 2 * config.n_channels_color if config.use_variance_channels else config.n_channels_color
+        self._n_color_channels = config.n_channels_color
 
         d_feature_maps = config.d_hidden
         mlp_d_in = d_feature_maps
@@ -385,10 +365,7 @@ class GaussianDecoder(nn.Module):
         else:
             self._mlp_decoder = MLP(mlp_d_in, [config.d_hidden] * (config.n_mlp_layers - 1) + [config.n_channels_color],
                                     activation_layer=GELU)
-            if config.use_vae:
-                self._out_activation = nn.Identity()
-            else:
-                self._out_activation = nn.Sigmoid()
+            self._out_activation = nn.Sigmoid()
 
         if config.head_transformer_type == HeadTransformerType.MESH_TOKENS:
             initial_gaussian_positions, uv_samples, _ = sample_template_positions(config.res_head_tokens, config.head_template)
@@ -434,10 +411,9 @@ class GaussianDecoder(nn.Module):
                               [config.d_hidden] * (config.n_mlp_layers - 1) + [
                                   (n_position_channels + 3 + 4 + 1 + self._n_color_channels) * config.n_gaussians_per_token],
                               activation_layer=GELU)
-            if not config.init_zero_color:
-                for p in mlp_decoder.parameters():
-                    if p.dim() > 1:
-                        nn.init.normal_(p, mean=0, std=0.02)
+            for p in mlp_decoder.parameters():
+                if p.dim() > 1:
+                    nn.init.normal_(p, mean=0, std=0.02)
 
         return mlp_decoder
 
@@ -502,14 +478,6 @@ class GaussianDecoder(nn.Module):
             scales = torch.clip(scales + self._config.scale_offset, min=self._config.scale_min, max=self._config.scale_max)
             positions = self._config.position_range * positions.tanh()
 
-        if self._config.use_variance_channels:
-            variances = colors[:, :, self._config.n_channels_color:]
-            if self._config.use_variance_activation:
-                # Force variances into [0, 1]
-                variances = variances.sigmoid()
-
-            colors = torch.cat([colors[:, :, :self._config.n_channels_color], variances], dim=-1)
-
         return positions, scales, rotations, colors, colors_sh, opacities
 
     def _upsample_feature_map(self, feature_map: torch.Tensor, perform_sampling: bool = True) -> torch.Tensor:
@@ -564,18 +532,11 @@ class GaussianDecoder(nn.Module):
                     gaussian_model.inverse_opacity_activation = Identity()
                     gaussian_model.scaling_activation = Identity()
                     gaussian_model.scaling_inverse_activation = Identity()
-                if self._config.make_contiguous:
-                    gaussian_model._xyz = positions[i].contiguous()
-                    gaussian_model._scaling = scales[i].contiguous()
-                    gaussian_model._rotation = rotations[i].contiguous()
-                    gaussian_model._features_dc = colors[i, :, None].contiguous()
-                    gaussian_model._opacity = opacities[i].contiguous()
-                else:
-                    gaussian_model._xyz = positions[i]
-                    gaussian_model._scaling = scales[i]
-                    gaussian_model._rotation = rotations[i]
-                    gaussian_model._features_dc = colors[i, :, None]
-                    gaussian_model._opacity = opacities[i]
+                gaussian_model._xyz = positions[i]
+                gaussian_model._scaling = scales[i]
+                gaussian_model._rotation = rotations[i]
+                gaussian_model._features_dc = colors[i, :, None]
+                gaussian_model._opacity = opacities[i]
 
                 if self._config.sh_degree == 0:
                     gaussian_model._features_rest = torch.empty(
@@ -588,8 +549,7 @@ class GaussianDecoder(nn.Module):
             b, v, c, h, w = pixel_aligned_predictions.shape
             pixel_aligned_predictions = rearrange(pixel_aligned_predictions, 'b v c h w -> (b v) c h w')
             pixel_aligned_predictions = self._upsample_feature_map(pixel_aligned_predictions,
-                                                                   aligned=True,
-                                                                   perform_sampling=self._config.sample_aligned_gaussians)  # [B*E, V*H*W, D]
+                                                                   perform_sampling=False)  # [B*E, V*H*W, D]
             pixel_aligned_predictions = self._mlp_decoder(pixel_aligned_predictions)
             pixel_aligned_predictions = self._out_activation(pixel_aligned_predictions)
             gaussian_models = rearrange(pixel_aligned_predictions, '(b v) (h w) c -> b v c h w', v=v,
@@ -613,45 +573,6 @@ class GaussianDecoder(nn.Module):
             gaussian_predictions['uv_opacities'] = opacities_mesh
 
         return gaussian_models, gaussian_predictions
-
-
-@dataclass
-class GaussianHeadLRMConfig(Config):
-    head_transformer: HeadTransformerConfig
-    gaussian_decoder: GaussianDecoderConfig
-    patch_size: int
-    in_channels: int
-    n_layers_encoder: int
-    n_input_views: int = 1
-    use_feature_projection: bool = False
-    feature_dim: int = 1536
-    use_bfloat16: bool = False
-    use_plucker: bool = False
-
-    compile: bool = False
-    use_gsplat: bool = False
-
-
-@dataclass
-class RenderingOutput:
-    rendered_images: torch.Tensor  # [B, TV, C, H, W]
-    rendered_raw_images: Optional[torch.Tensor] = None
-
-
-@dataclass
-class GaussianModelsOutput:
-    gaussian_models: List[List[GaussianModel]]
-    gaussian_predictions: Optional[Dict[str, torch.Tensor]] = None
-    x_repa: Optional[torch.Tensor] = None
-    internal_representations: Optional[torch.Tensor] = None
-    residual_codes: Optional[torch.Tensor] = None
-    vae_output: Optional = None
-
-
-@dataclass
-class GaussianHeadLRMOutput:
-    gaussian_models_output: GaussianModelsOutput
-    rendering_output: RenderingOutput
 
 
 class GaussianHeadLRM(nn.Module):
@@ -679,9 +600,6 @@ class GaussianHeadLRM(nn.Module):
                 patch_size=config.patch_size
             )
             self._transformer_encoder = GPT(gpt_config)
-        else:
-            transformer_encoder_config = replace(config.head_transformer.transformer, n_layers=config.n_layers_encoder, use_alternating_self_attention=False)
-            self._transformer_encoder = Transformer(transformer_encoder_config)
 
         self._head_transformer = HeadTransformer(config.head_transformer)
         self._gaussian_decoder = GaussianDecoder(config.gaussian_decoder)
@@ -713,7 +631,6 @@ class GaussianHeadLRM(nn.Module):
                                input_cam2worlds: Optional[List[List[Pose]]] = None,
                                input_intrinsics: Optional[List[List[Intrinsics]]] = None,
                                expression_codes: Optional[torch.Tensor] = None,
-                               residual_codes: Optional[torch.Tensor] = None,
                                dataset_ids: Optional[torch.Tensor] = None,
                                condition: Optional[torch.Tensor] = None,
                                input_view_mask: Optional[torch.Tensor] = None,
@@ -761,7 +678,6 @@ class GaussianHeadLRM(nn.Module):
                     VC = features_clean.shape[1]
 
                     if H_p != features_clean.shape[-2] or W_p != features_clean.shape[-1]:
-                        # TODO: Currently, features also assume just a single input image
                         xs = torch.linspace(-1, 1, steps=W_p, device=self.device)
                         ys = torch.linspace(-1, 1, steps=H_p, device=self.device)
                         xs, ys = torch.meshgrid(xs, ys)
@@ -851,12 +767,6 @@ class GaussianHeadLRM(nn.Module):
         use_gsplat = self._config.use_gsplat if use_gsplat is None else use_gsplat
 
         render_bg_colors = torch.stack([torch.tensor(render_bg_color, device=self.device) / 255. for render_bg_color in batch.render_bg_color])
-        if self._config.gaussian_decoder.use_variance_channels:
-            if self._config.gaussian_decoder.init_zero_variance:
-                render_bg_colors = torch.cat([render_bg_colors, torch.zeros_like(render_bg_colors)], dim=-1)
-            else:
-                render_bg_colors = torch.cat([render_bg_colors, -1 * torch.ones_like(render_bg_colors)],
-                                             dim=-1)  # Background has fix the smallest possible variance
 
         rendered_images = []
         all_gaussian_models = []
@@ -875,11 +785,6 @@ class GaussianHeadLRM(nn.Module):
                     gaussian_model = gaussian_model_list[v]
                 render_cam = pose_to_rendercam(batch.render_cam2world_poses[i][v], batch.render_intrinsics[i][v], img_w, img_h)
                 override_color = None
-                if self._config.gaussian_decoder.use_variance_channels:
-                    override_color = gaussian_model._features_dc[:, 0]
-                    override_color = torch.cat([
-                        torch.clamp_min(override_color[..., :self._config.gaussian_decoder.n_channels_color] + 0.5, 0.0),
-                        override_color[..., self._config.gaussian_decoder.n_channels_color:]], dim=1)
                 if use_gsplat:
                     all_gaussian_models.append(gaussian_model)
                     all_render_cams.append(render_cam)
@@ -893,12 +798,6 @@ class GaussianHeadLRM(nn.Module):
                     #                        override_color=override_color)  # TamingGS apparently has some issue with back-propagating color when SHs are computed in CUDA...
 
                     rendered_image = render_output['render']
-
-                    if self._config.gaussian_decoder.use_variance_channels and self._config.gaussian_decoder.init_zero_variance:
-                        # Variance prediction
-                        # [0, 1] -> [-1, 1]
-                        rendered_image[self._config.gaussian_decoder.n_channels_color:] = rendered_image[
-                                                                                          self._config.gaussian_decoder.n_channels_color:] * 2 - 1
 
                     rendered_images_single.append(rendered_image)
 
@@ -970,27 +869,14 @@ class GaussianHeadLRM(nn.Module):
                 single_gaussian_models_uv.append(gm)
 
             gaussian_models_uv.append(single_gaussian_models_uv)
-            # previous_colors.append(single_previous_colors)
-
-            # if include_transparent_gaussians:
-            #     debug_gaussian_attributes[GaussianAttribute.OPACITY] = torch.ones_like(
-            #         debug_gaussian_attributes[GaussianAttribute.OPACITY])
-
-        # ellipsoid_mesh = gaussians_to_mesh(torch.tensor([[0, 0, -0.05]]), torch.tensor([[0.08, 0.05, 0.05]]), torch.ones((1, 4)), torch.zeros((1, 3)),
-        #                                    torch.ones((1, 1)))
 
         batch_uv = replace(batch, render_bg_color=[(255, 255, 255, 255) for _ in range(batch.B)],
                            render_cam2world_poses=[create_random_cameras(batch.VT) for b in range(batch.B)])
         rendering_output = self.render(gaussian_models_uv, batch_uv, use_gsplat=False)
 
-        # for b in range(len(gaussian_models)):
-        #     for v in range(len(gaussian_models[b])):
-        #         gaussian_models[b][v]._features_dc = previous_colors[b][v]
 
         return rendering_output.rendered_images
 
-    def forward_residual_encoder(self, images: torch.Tensor) -> torch.Tensor:
-        return None
 
     def forward(self,
                 batch: GaussianHeadLRMBatch,
@@ -1000,11 +886,6 @@ class GaussianHeadLRM(nn.Module):
                 only_gaussian_models: bool = False,
                 return_uv_attributes: bool = False) -> GaussianHeadLRMOutput:
 
-        if batch.residual_codes is None:
-            residual_codes = self.forward_residual_encoder(batch.target_images)
-        else:
-            residual_codes = batch.residual_codes
-
         gaussian_models_output = self.create_gaussian_models(batch.input_images,
                                                              features=batch.features,
                                                              input_cam2worlds=batch.input_cam2worlds,
@@ -1012,7 +893,6 @@ class GaussianHeadLRM(nn.Module):
                                                              condition=condition,
                                                              input_view_mask=batch.input_view_mask,
                                                              expression_codes=batch.expression_codes,
-                                                             residual_codes=residual_codes,
                                                              dataset_ids=batch.dataset_ids,
                                                              cached_internal_representations=cached_internal_representations,
                                                              only_internal_representations=only_internal_representations,
@@ -1021,19 +901,19 @@ class GaussianHeadLRM(nn.Module):
         if not only_internal_representations and not only_gaussian_models:
             rendering_output = self.render(gaussian_models_output.gaussian_models, batch)
 
-        gaussian_models_output.residual_codes = residual_codes
         output = GaussianHeadLRMOutput(gaussian_models_output, rendering_output)
 
         return output
 
 
 if __name__ == '__main__':
-    from elias.util.io import load_json
+    from elias.util.io import load_json, save_img
     from flexavatar.data_adapter.in_the_wild_data_adapter import InTheWildDataAdapter
     from flexavatar.config.dataset_config import SampleMetadata
     from visage.matting.modnet import MODNetMatter
 
     data_adapter = InTheWildDataAdapter("tobi")
+    data_adapter2 = InTheWildDataAdapter("gemini_cvpr_hat_14")
     sample_metadata = SampleMetadata("tobi", None, 0, None)
     image = data_adapter.load_image(sample_metadata)
 
@@ -1052,8 +932,9 @@ if __name__ == '__main__':
     image_torch = image_torch * alpha_maps[:, None] + 1 - alpha_maps[:, None]
 
     expression_code = torch.zeros((1, 1, 135))
-    expression_code[:, :, :126] = torch.tensor(data_adapter.load_expression_code(sample_metadata))
-    batch = GaussianHeadLRMBatch(image_torch[:, None], None, [[flame2world_pose]], [[intrinsics.rescale(1 / 512, inplace=False)]], None, None, None, None, None, None,
+    expression_code[:, :, :126] = torch.tensor(data_adapter2.load_expression_code(sample_metadata))
+    batch = GaussianHeadLRMBatch(image_torch[:, None], None, [[flame2world_pose]], [[intrinsics.rescale(1 / 512, inplace=False)]], None, None, None, None, None,
+                                 None,
                                  expression_codes=expression_code,
                                  dataset_ids=torch.ones((1, 1), dtype=torch.long))
     batch = batch.to(device)
@@ -1084,4 +965,5 @@ if __name__ == '__main__':
         rendering_output = render_distwar(render_cam, output.gaussian_models[0][0], PipelineParams2(), torch.ones((3,), device=device))
         rendered_image = rendering_output['render'].permute(1, 2, 0).detach().cpu().numpy()
 
+    save_img(np.clip(rendered_image * 255, 0, 255).astype(np.uint8), "D:/Projects/PhD-7_Photoreal_3DMM/code_release/regression.png")
     print('hi')

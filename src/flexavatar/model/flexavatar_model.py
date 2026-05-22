@@ -905,15 +905,12 @@ class GaussianHeadLRM(nn.Module):
                 n_layer=config.n_layers_encoder,
                 n_head=config.head_transformer.transformer.n_heads,
                 n_embd=config.head_transformer.transformer.d_hidden,
-                use_adaptive_layer_norm=False,
-                init_adaptive_layer_norm_identity=False,
                 use_repa=config.head_transformer.use_repa,
                 repa_layer=config.head_transformer.repa_layer,
                 d_repa_target=config.head_transformer.d_repa_target,
                 use_post_layer_norm=config.head_transformer.use_transformer_encoder_ln,
                 n_merged_views=1 if config.encode_images_separately else config.n_input_views,
                 use_causal_attention=config.head_transformer.transformer.use_causal_attention,
-                use_prope=False,
                 patch_size=config.patch_size
             )
             self._transformer_encoder = GPT(gpt_config)
@@ -1040,7 +1037,7 @@ class GaussianHeadLRM(nn.Module):
                 if self._config.head_transformer.use_repa:
                     x, x_repa = self._transformer_encoder(xs[0], condition=conditions_encoder[0], poses=prope_poses, intrinsics=prope_intrinsics)
                 else:
-                    x = self._transformer_encoder(xs[0], condition=conditions_encoder[0], poses=prope_poses, intrinsics=prope_intrinsics)
+                    x = self._transformer_encoder(xs[0])
 
                 if self._config.encode_images_separately:
                     x = rearrange(x, '(h w) (b v) c -> (v h w) b c', h=H_p, w=W_p, b=B, v=V)

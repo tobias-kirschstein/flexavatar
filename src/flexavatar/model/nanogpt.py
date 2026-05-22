@@ -14,7 +14,6 @@ from typing import Optional
 
 import torch
 import torch.nn as nn
-from einops import rearrange
 from elias.config import Config
 from torch.nn import functional as F
 
@@ -80,26 +79,7 @@ class CausalSelfAttention(nn.Module):
         # causal self-attention; Self-attend: (B, nh, T, hs) x (B, nh, hs, T) -> (B, nh, T, T)
         if self.flash:
             # efficient attention using Flash Attention CUDA kernels
-            if self.config.use_prope:
-                VT = poses.shape[1]
-                patches_x = int(math.sqrt(T // VT))
-                patches_y = patches_x
-                image_width = patches_x * self.config.patch_size
-                image_height = patches_y * self.config.patch_size
-                y = prope_dot_product_attention(
-                    q,
-                    k,
-                    v,
-                    viewmats=poses,
-                    Ks=intrinsics,
-                    patches_x=patches_x,
-                    patches_y=patches_y,
-                    image_width=image_width,
-                    image_height=image_height,
-                    attn_mask=None, dropout_p=self.dropout if self.training else 0, is_causal=self.config.use_causal_attention
-                )
-            else:
-                y = torch.nn.functional.scaled_dot_product_attention(q, k, v, attn_mask=None, dropout_p=self.dropout if self.training else 0, is_causal=self.config.use_causal_attention)
+            y = torch.nn.functional.scaled_dot_product_attention(q, k, v, attn_mask=None, dropout_p=self.dropout if self.training else 0, is_causal=self.config.use_causal_attention)
         else:
             # manual implementation of attention
             att = (q @ k.transpose(-2, -1)) * (1.0 / math.sqrt(k.size(-1)))
@@ -160,40 +140,12 @@ class Block(nn.Module):
         self.mlp = MLP(config)
         self.config = config
 
-        if config.use_adaptive_layer_norm:
-            self.adaLN_modulation = nn.Sequential(
-                nn.SiLU(),
-                nn.Linear(config.n_embd, 6 * config.n_embd, bias=True)
-            )
-
-            self.init_weights()
-
-    def init_weights(self):
-        # Zero-out adaLN modulation layers:
-        nn.init.constant_(self.adaLN_modulation[-1].weight, 0)
-        nn.init.constant_(self.adaLN_modulation[-1].bias, 0)
-
-        if self.config.init_adaptive_layer_norm_identity:
-            identity_initialization = torch.tensor([0, 1, 1, 0, 1, 1], dtype=torch.float32).repeat_interleave(self.config.n_embd)
-            self.adaLN_modulation[-1].bias.data = identity_initialization
-
     def forward(self, x: torch.Tensor,
                 keys: Optional[torch.Tensor] = None,
-                condition: Optional[torch.Tensor] = None,
                 poses: Optional[torch.Tensor] = None,
                 intrinsics: Optional[torch.Tensor] = None):
-        if self.config.use_adaptive_layer_norm:
-            shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp = self.adaLN_modulation(condition).chunk(6, dim=-1)
-            if condition is not None and len(condition.shape) == 3:
-                T = x.shape[1] // condition.shape[1] if len(condition.shape) == 3 else None
-                x = x + gate_msa.repeat_interleave(T, dim=1) * self.attn(modulate(self.ln_1(x), shift_msa, scale_msa, reps=T), keys=keys, poses=poses, intrinsics=intrinsics)
-                x = x + gate_mlp.repeat_interleave(T, dim=1) * self.mlp(modulate(self.ln_2(x), shift_mlp, scale_mlp, reps=T))
-            else:
-                x = x + gate_msa.unsqueeze(1) * self.attn(modulate(self.ln_1(x), shift_msa, scale_msa), keys=keys, poses=poses, intrinsics=intrinsics)
-                x = x + gate_mlp.unsqueeze(1) * self.mlp(modulate(self.ln_2(x), shift_mlp, scale_mlp))
-        else:
-            x = x + self.attn(self.ln_1(x), keys=keys, poses=poses, intrinsics=intrinsics)
-            x = x + self.mlp(self.ln_2(x))
+        x = x + self.attn(self.ln_1(x), keys=keys, poses=poses, intrinsics=intrinsics)
+        x = x + self.mlp(self.ln_2(x))
 
         return x
 
@@ -206,8 +158,6 @@ class GPTConfig(Config):
     dropout: float = 0.0
     bias: bool = True # True: bias in Linears and LayerNorms, like GPT-2. False: a bit better and faster
     use_cross_attention: bool = False
-    use_adaptive_layer_norm: bool = False  # remove
-    init_adaptive_layer_norm_identity: bool = False  # remove
     use_repa: bool = False
     repa_layer: int = -1  # -1 is last layer
     d_repa_target: int = 768  # Target dimension for REPA, e.g., dimension of DinoV2
@@ -218,7 +168,6 @@ class GPTConfig(Config):
     n_merged_views: int = 1 # Relevant for adaptive layer norm s.t. it can be applied for each input view separately
     use_causal_attention: bool = True
 
-    use_prope: bool = False  # remove
     patch_size: Optional[int] = None
 
 
@@ -251,10 +200,6 @@ class GPT(nn.Module):
             if pn.endswith('c_proj.weight'):
                 torch.nn.init.normal_(p, mean=0.0, std=0.02/math.sqrt(2 * config.n_layer))
 
-        if config.use_adaptive_layer_norm:
-            for block in self.transformer.h:
-                block.init_weights()
-
         # report number of parameters
         print("number of parameters: %.2fM" % (self.get_num_params()/1e6,))
 
@@ -283,7 +228,6 @@ class GPT(nn.Module):
 
     def forward(self, x: torch.Tensor,
                 keys: Optional[torch.Tensor] = None,
-                condition: Optional[torch.Tensor] = None,
                 poses: Optional[torch.Tensor] = None,
                 intrinsics: Optional[torch.Tensor] = None
                 ):
@@ -307,7 +251,7 @@ class GPT(nn.Module):
             x = torch.concat([x, registers], dim=1)
 
         for i, block in enumerate(self.transformer.h):
-            x = block(x, keys=keys, condition=condition, poses=poses, intrinsics=intrinsics)
+            x = block(x, keys=keys, poses=poses, intrinsics=intrinsics)
 
             if self.config.use_repa and ((i+1) == self.config.repa_layer or self.config.repa_layer == -1 and (i+1) == len(self.transformer.h)):
                 x_repa = self._repa_mlp(x[:, :T].reshape(-1, C)).reshape(B, T, -1)

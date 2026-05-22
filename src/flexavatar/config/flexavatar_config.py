@@ -36,13 +36,9 @@ class HeadTransformerConfig(Config):
     cross_attention_type: CrossAttentionType = CrossAttentionType.Q2K
     use_lam_transformer: bool = False
     use_lam_point_embedder: bool = False
-    use_gpt: bool = False  # remove
-    use_adaptive_layer_norm: bool = False  # remove
-    init_adaptive_layer_norm_identity: bool = False  # remove
     res_image_tokens: Optional[int] = None
     n_input_views: int = 1
     use_image_token_embeddings: bool = False
-    use_pixel_aligned_gaussians: bool = False  # remove
     use_repa: bool = False
     repa_layer: int = -1
     d_repa_target: int = 768
@@ -58,8 +54,6 @@ class HeadTransformerConfig(Config):
     n_residual_tokens: Optional[int] = None
     use_head_tokens: bool = True
     n_layers_expression_transformer: int = 4
-    use_vae: bool = False  # remove
-    use_point_generator: bool = False  # remove
     n_point_generator_layers: int = 6
     use_dataset_ids: bool = False
     use_separate_dataset_ids: bool = False

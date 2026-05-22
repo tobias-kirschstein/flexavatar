@@ -1,13 +1,11 @@
 import platform
 from dataclasses import dataclass, replace
-from math import sqrt
 from typing import Optional, List, Tuple, Union, Dict
 
 import numpy as np
 import torch
 from dreifus.camera import PoseType
 from dreifus.matrix import Pose, Intrinsics
-from dreifus.render import project
 from dreifus.vector import Vec3
 from einops import rearrange
 from elias.config import Config
@@ -30,7 +28,6 @@ from flexavatar.util.plucker import plucker_embedder
 from flexavatar.util.uv import gen_tritex
 from torch import nn, device
 from torch.nn import GELU, LayerNorm, PixelShuffle, Identity
-from torch.nn.functional import interpolate
 from torch.nn.modules.module import T
 from torchvision.ops import MLP
 from trimesh import load_mesh
@@ -155,8 +152,8 @@ class HeadTransformer(nn.Module):
         if config.use_lam_transformer:
             self._transformer = TransformerDecoder('sd3_cond', config.transformer.n_layers, config.transformer.n_heads, config.transformer.d_hidden,
                                                    cond_dim=config.transformer.d_hidden,
-                                                   use_ada_ln=config.use_adaptive_layer_norm,
-                                                   transform_keys=config.use_pixel_aligned_gaussians)  # TODO: cond_dim could be different
+                                                   use_ada_ln=False,
+                                                   transform_keys=False)  # TODO: cond_dim could be different
         else:
             self._transformer = Transformer(config.transformer)
 
@@ -166,14 +163,14 @@ class HeadTransformer(nn.Module):
                                            config.transformer.d_hidden if config.n_expression_tokens is None else config.transformer.d_hidden * config.n_expression_tokens],
                                        activation_layer=torch.nn.ReLU)
 
-        if config.d_expression_codes is not None and not config.use_point_generator:
+        if config.d_expression_codes is not None:
             if config.use_lam_transformer:
                 self._expression_transformer = TransformerDecoder('sd3_cond',
                                                                   config.n_layers_expression_transformer, config.transformer.n_heads,
                                                                   config.transformer.d_hidden,
                                                                   cond_dim=config.transformer.d_hidden,
-                                                                  use_ada_ln=config.use_adaptive_layer_norm,
-                                                                  transform_keys=config.use_pixel_aligned_gaussians)  # TODO: cond_dim could be different
+                                                                  use_ada_ln=False,
+                                                                  transform_keys=False)  # TODO: cond_dim could be different
 
             else:
                 self._expression_transformer = Transformer(config.transformer)
@@ -187,8 +184,8 @@ class HeadTransformer(nn.Module):
             self._residual_transformer = TransformerDecoder('sd3_cond',
                                                             config.transformer.n_layers, config.transformer.n_heads, config.transformer.d_hidden,
                                                             cond_dim=config.transformer.d_hidden,
-                                                            use_ada_ln=config.use_adaptive_layer_norm,
-                                                            transform_keys=config.use_pixel_aligned_gaussians)  # TODO: cond_dim could be different
+                                                            use_ada_ln=False,
+                                                            transform_keys=False)  # TODO: cond_dim could be different
 
             for layer in self._residual_transformer.layers:
                 layer.ff.net[-1].weight.data[:] = 0
@@ -230,17 +227,6 @@ class HeadTransformer(nn.Module):
                 self._backprojected_xyz_image_token_embeddings_mlp = MLP(config.transformer.d_hidden + 3,
                                                                          [4 * config.transformer.d_hidden, config.transformer.d_hidden],
                                                                          activation_layer=GELU)
-
-        if config.use_vae:
-            self._vae = VAEModule(config.transformer.d_hidden)
-
-        if config.use_point_generator:
-            num_pts = 512
-            random_coords = torch.randn((num_pts, 3))
-            point_generator_xyz = random_coords * torch.rsqrt(torch.mean(random_coords ** 2, dim=1, keepdim=True) + 1e-8) * 0.5 * 0.6
-            self._point_generator_xyz = nn.Parameter(point_generator_xyz)
-            self._point_generator = PointGenerator(
-                PointGeneratorConfig(w_dim=config.transformer.d_hidden, d_hidden=config.transformer.d_hidden, n_transformer=config.n_point_generator_layers))
 
         if config.use_representation_compressor:
             self._representation_compressor = RepresentationCompressor(RepresentationCompressorConfig(config.res_head_tokens,
@@ -313,10 +299,7 @@ class HeadTransformer(nn.Module):
                     pixel_aligned_predictions = x[-len(image_queries):]
                     x = x[:len(queries)]
                 else:
-                    if self._config.use_lam_transformer and self._config.use_pixel_aligned_gaussians:
-                        x, pixel_aligned_predictions = self._transformer(queries, keys=x, condition=condition, return_keys=True)
-                    else:
-                        x = self._transformer(queries, keys=x, condition=condition)
+                    x = self._transformer(queries, keys=x, condition=condition)
             elif self._config.cross_attention_type == CrossAttentionType.Q2QK:
                 qk = torch.cat([queries, x], dim=0)
                 x = self._transformer(queries, keys=qk, condition=condition)
@@ -351,9 +334,6 @@ class HeadTransformer(nn.Module):
             x = torch.cat([x, pixel_aligned_predictions])
 
         vae_output = None
-        if self._config.use_vae:
-            vae_output = self._vae(x)
-            x = vae_output.x
 
         internal_representation = x
 
@@ -395,34 +375,30 @@ class HeadTransformer(nn.Module):
                     dataset_tokens = dataset_tokens.repeat_interleave(expression_codes.shape[1], dim=1)
                 expression_tokens = torch.cat([dataset_tokens, expression_tokens], dim=0)
 
-        if self._config.use_point_generator:
-            w = x[0]  # [B, D]
-            x = self._point_generator(self._point_generator_xyz.repeat(w.shape[0], 1, 1), w[:, None], keys=expression_tokens)
-        else:
-            if self._config.d_expression_codes:
-                x = self._expression_transformer(x, keys=expression_tokens, condition=condition)
-                if pixel_aligned_predictions is not None:
-                    pixel_aligned_predictions = x[-len(pixel_aligned_predictions):]
-                    x = x[:-len(pixel_aligned_predictions)]
+        if self._config.d_expression_codes:
+            x = self._expression_transformer(x, keys=expression_tokens, condition=condition)
+            if pixel_aligned_predictions is not None:
+                pixel_aligned_predictions = x[-len(pixel_aligned_predictions):]
+                x = x[:-len(pixel_aligned_predictions)]
 
-            if self._config.d_residual_codes is not None:
-                B = x.shape[1]
+        if self._config.d_residual_codes is not None:
+            B = x.shape[1]
 
-                if pixel_aligned_predictions is not None:
-                    x = torch.cat([x, pixel_aligned_predictions])
+            if pixel_aligned_predictions is not None:
+                x = torch.cat([x, pixel_aligned_predictions])
 
-                if self._config.n_residual_tokens is None:
-                    residual_tokens = self._residual_mlp(residual_codes).flatten(0, 1)
-                else:
-                    residual_tokens = self._residual_mlp(residual_codes).reshape(B,
-                                                                                 self._config.n_residual_tokens,
-                                                                                 self._config.transformer.d_hidden)
-                residual_tokens = residual_tokens.permute(1, 0, 2)
+            if self._config.n_residual_tokens is None:
+                residual_tokens = self._residual_mlp(residual_codes).flatten(0, 1)
+            else:
+                residual_tokens = self._residual_mlp(residual_codes).reshape(B,
+                                                                             self._config.n_residual_tokens,
+                                                                             self._config.transformer.d_hidden)
+            residual_tokens = residual_tokens.permute(1, 0, 2)
 
-                x = self._residual_transformer(x, keys=residual_tokens, condition=condition)
-                if pixel_aligned_predictions is not None:
-                    pixel_aligned_predictions = x[-len(pixel_aligned_predictions):]
-                    x = x[:-len(pixel_aligned_predictions)]
+            x = self._residual_transformer(x, keys=residual_tokens, condition=condition)
+            if pixel_aligned_predictions is not None:
+                pixel_aligned_predictions = x[-len(pixel_aligned_predictions):]
+                x = x[:-len(pixel_aligned_predictions)]
 
         return x, pixel_aligned_predictions, internal_representation, vae_output
 
@@ -588,10 +564,7 @@ class GaussianDecoderConfig(Config):
     res_image_tokens: Optional[int] = None
     upscale_uv_texture: Optional[int] = None
     head_transformer_type: HeadTransformerType = HeadTransformerType.MESH_TOKENS
-    use_separate_mlps: bool = False  # remove
-    use_stylegan_upsampler: bool = False  # remove
     use_stylegan_pixelshuffle_upsampler: bool = False
-    use_pixel_aligned_gaussians: bool = False  # remove
     sample_aligned_gaussians: bool = False
     use_norm_before_mlp: bool = True
     initialize_with_image: bool = False
@@ -599,7 +572,6 @@ class GaussianDecoderConfig(Config):
     use_variance_channels: bool = False
     fix_mlp_order: bool = False
     use_color_skip: bool = False
-    use_mesh_color_init: bool = False  # remove
     init_zero_color: bool = False
     init_zero_variance: bool = False
     use_variance_activation: bool = False
@@ -610,14 +582,9 @@ class GaussianDecoderConfig(Config):
     use_lam_gs_decoder: bool = False
     use_gaussians: bool = True  # If False, simply decode 1 pixel value per pixel_aligned_token
     use_vae: bool = False
-    expand_feature_maps: int = 1  # remove
     make_contiguous: bool = False
-    use_flame_deformer: bool = False  # remove
-    use_pixel3dmm_flame_deformer: bool = False  # remove
-    flame_deformer_type: str = 'post'  # remove
     sh_degree: int = 0
     head_template: str = 'gghead_template'
-    use_expression_code_ws: bool = False  # remove
     d_expression_codes: Optional[int] = None
 
 
@@ -628,9 +595,9 @@ class GaussianDecoder(nn.Module):
 
         self._n_color_channels = 2 * config.n_channels_color if config.use_variance_channels else config.n_channels_color
 
-        d_feature_maps = config.d_hidden * config.expand_feature_maps
+        d_feature_maps = config.d_hidden
         mlp_d_in = d_feature_maps
-        if config.head_transformer_type == HeadTransformerType.UV_TEXTURE and config.upscale_uv_texture is not None and not config.use_stylegan_upsampler:
+        if config.head_transformer_type == HeadTransformerType.UV_TEXTURE and config.upscale_uv_texture is not None:
             mlp_d_in = mlp_d_in // config.upscale_uv_texture ** 2
             assert mlp_d_in * config.upscale_uv_texture ** 2 == d_feature_maps, "MLP input size needs to be divisible by upscale factor"
 
@@ -639,13 +606,6 @@ class GaussianDecoder(nn.Module):
 
         if config.use_gaussians:
             self._mlp_decoder = self.create_mlp_decoder(config, mlp_d_in)
-            if config.use_pixel_aligned_gaussians:
-                if config.use_separate_mlp_decoder:
-                    self._mlp_decoder_pixel_aligned_gaussians = self.create_mlp_decoder(config, mlp_d_in)
-                    # n_position_channels=1 if config.predict_depth else 3)  # TODO: Requires generalizing how we extract positions
-                else:
-                    self._mlp_decoder_pixel_aligned_gaussians = self._mlp_decoder
-                    # self._mlp_decoder_pixel_aligned_gaussians = lambda x: self._mlp_decoder(x)
         else:
             self._mlp_decoder = MLP(mlp_d_in, [config.d_hidden] * (config.n_mlp_layers - 1) + [config.n_channels_color],
                                     activation_layer=GELU)
@@ -669,27 +629,10 @@ class GaussianDecoder(nn.Module):
                     use_noise=False,
                     initialize_with_image=config.initialize_with_image
                 )
-                if config.use_pixel_aligned_gaussians and (config.use_stylegan_upsampler or config.use_stylegan_pixelshuffle_upsampler):
-                    stylegan_config_aligned = replace(stylegan_config,
-                                                      input_res=config.res_image_tokens,
-                                                      output_res=config.res_image_tokens * config.upscale_uv_texture)
-
-                if config.use_stylegan_upsampler:
-                    self._stylegan_upsampler = StyleGANUpsampler(stylegan_config)
-                    if config.use_pixel_aligned_gaussians:
-                        self._stylegan_upsampler_aligned = StyleGANUpsampler(stylegan_config_aligned)
-                elif config.use_stylegan_pixelshuffle_upsampler:
+                if config.use_stylegan_pixelshuffle_upsampler:
                     self._stylegan_upsampler = StyleGANPixelShuffleUpsampler(stylegan_config)
-                    if config.use_pixel_aligned_gaussians:
-                        self._stylegan_upsampler_aligned = StyleGANPixelShuffleUpsampler(stylegan_config_aligned)
-
-                    if config.use_expression_code_ws:
-                        self._expression_code_ws_mlp = nn.Linear(config.d_expression_codes, stylegan_config.w_dim)
                 else:
                     self._uv_texture_pixel_shuffle = PixelShuffle(config.upscale_uv_texture)
-
-                if config.expand_feature_maps > 1:
-                    self._feature_map_expander = nn.Linear(config.d_hidden, d_feature_maps)
 
         else:
             raise ValueError(f"Unknown head transformer type: {config.head_transformer_type}")
@@ -700,23 +643,7 @@ class GaussianDecoder(nn.Module):
             self.register_buffer("_initial_gaussian_positions", initial_gaussian_positions, persistent=False)
             self.register_buffer("_uv_samples", uv_samples, persistent=False)
 
-        if config.use_pixel_aligned_gaussians and config.sample_aligned_gaussians:
-            xs = torch.linspace(-1, 1, steps=config.res_image_tokens * config.upscale_uv_texture * config.oversampling_factor)
-            ys = torch.linspace(-1, 1, steps=config.res_image_tokens * config.upscale_uv_texture * config.oversampling_factor)
-
-            xs, ys = torch.meshgrid(xs, ys, indexing='ij')
-            uv_samples_aligned = torch.stack([ys, xs], dim=-1)
-            uv_samples_aligned = uv_samples_aligned.reshape(1, -1, 1, 2)  # [1, G_aligned, 1, 2]
-            self.register_buffer("_uv_samples_aligned", uv_samples_aligned, persistent=False)
-
         self.register_buffer("_device_indicator", torch.empty(0), persistent=False)
-
-        if config.use_flame_deformer:
-            self._flame_deformer = FlameDeformer()
-
-        if config.use_pixel3dmm_flame_deformer:
-            from photoreal_3dmm.model.flame.pixel3dmm_flame_deformer import Pixel3DMMFlameDeformer
-            self._flame_deformer = Pixel3DMMFlameDeformer(config.res_head_tokens)
 
     @property
     def device(self):
@@ -727,29 +654,10 @@ class GaussianDecoder(nn.Module):
         if config.use_lam_gs_decoder:
             mlp_decoder = GSLayer(mlp_d_in, sh_degree=self._config.sh_degree, use_rgb=self._config.sh_degree == 0)
         else:
-            if config.use_separate_mlps:
-                out_channels = [n_position_channels, 3, 4, 1, self._n_color_channels]
-                mlps = []
-                for c in out_channels:
-                    mlp = MLP(mlp_d_in, [config.d_hidden] * (config.n_mlp_layers - 1) + [c * config.n_gaussians_per_token],
+            mlp_decoder = MLP(mlp_d_in,
+                              [config.d_hidden] * (config.n_mlp_layers - 1) + [
+                                  (n_position_channels + 3 + 4 + 1 + self._n_color_channels) * config.n_gaussians_per_token],
                               activation_layer=GELU)
-                    mlps.append(mlp)
-                if config.init_zero_color:
-                    for mlp in mlps:
-                        for p in mlp.parameters():
-                            if p.dim() > 1:
-                                nn.init.normal_(p, mean=0, std=0.02)
-
-                    nn.init.constant_(mlps[-1][-2].weight, 0)
-                    nn.init.constant_(mlps[-1][-2].bias, 0)
-
-                mlp_decoder = MLPBundle(mlps, interleave_factor=config.n_gaussians_per_token)
-
-            else:
-                mlp_decoder = MLP(mlp_d_in,
-                                  [config.d_hidden] * (config.n_mlp_layers - 1) + [
-                                      (n_position_channels + 3 + 4 + 1 + self._n_color_channels) * config.n_gaussians_per_token],
-                                  activation_layer=GELU)
             if not config.init_zero_color:
                 for p in mlp_decoder.parameters():
                     if p.dim() > 1:
@@ -762,9 +670,7 @@ class GaussianDecoder(nn.Module):
                           x: torch.Tensor,
                           h: Optional[int] = None,
                           v: int = 1,
-                          perform_sampling: bool = True,
-                          aligned: bool = False,
-                          expression_codes: Optional[torch.Tensor] = None):
+                          perform_sampling: bool = True):
         B, HT, C = x.shape
 
         if self._config.head_transformer_type == HeadTransformerType.MESH_TOKENS:
@@ -783,7 +689,7 @@ class GaussianDecoder(nn.Module):
 
             uv_texture = x.permute(0, 3, 1, 2)  # [BV, C, H, W]
 
-            sampled_features = self._upsample_feature_map(uv_texture, perform_sampling=perform_sampling, aligned=aligned, expression_codes=expression_codes)
+            sampled_features = self._upsample_feature_map(uv_texture, perform_sampling=perform_sampling)
 
             sampled_features = sampled_features.reshape(B, v * sampled_features.shape[-2], sampled_features.shape[-1])  # [B*E, V*H*W, D]
 
@@ -830,33 +736,16 @@ class GaussianDecoder(nn.Module):
 
         return positions, scales, rotations, colors, colors_sh, opacities
 
-    def _upsample_feature_map(self, feature_map: torch.Tensor, aligned: bool = False, perform_sampling: bool = True,
-                              expression_codes: Optional[torch.Tensor] = None) -> torch.Tensor:
-        if self._config.expand_feature_maps > 1:
-            feature_map = self._feature_map_expander(feature_map.permute(0, 2, 3, 1)).permute(0, 3, 1, 2)
-
+    def _upsample_feature_map(self, feature_map: torch.Tensor, perform_sampling: bool = True) -> torch.Tensor:
         if self._config.upscale_uv_texture is not None:
-            if self._config.use_stylegan_upsampler or self._config.use_stylegan_pixelshuffle_upsampler:
+            if self._config.use_stylegan_pixelshuffle_upsampler:
                 with torch.autocast(device_type="cuda", enabled=False):
-                    if aligned:
-                        # Upsample back-projected image tokens
-                        feature_map = self._stylegan_upsampler_aligned(feature_map.float())
-                    else:
-                        ws = None
-                        if self._config.use_expression_code_ws:
-                            ws = self._expression_code_ws_mlp(expression_codes.flatten(0, 1))  # [B * VT, D]
-
-                        # Upsample head tokens
-                        feature_map = self._stylegan_upsampler(feature_map.float(), ws=ws)
+                    feature_map = self._stylegan_upsampler(feature_map.float(), ws=None)
             else:
                 feature_map = self._uv_texture_pixel_shuffle(feature_map)
 
         if perform_sampling:
-            if aligned:
-                uv_samples = self._uv_samples_aligned.repeat(feature_map.shape[0], 1, 1, 1)  # [BV, G_aligned, 1, 2]
-            else:
-                uv_samples = self._uv_samples.repeat(feature_map.shape[0], 1, 1, 1)  # [BV, G, 1, 2]
-
+            uv_samples = self._uv_samples.repeat(feature_map.shape[0], 1, 1, 1)  # [BV, G, 1, 2]
             sampled_features = torch.nn.functional.grid_sample(feature_map, uv_samples)[:, :, :, 0]  # [BV, D, G]
             sampled_features = sampled_features.permute(0, 2, 1)
         else:
@@ -878,116 +767,15 @@ class GaussianDecoder(nn.Module):
 
         if self._config.use_gaussians:
             use_mesh_gaussians = self._config.use_head_tokens and not only_pixel_aligned_gaussians
-            use_pixel_aligned_gaussians = self._config.use_pixel_aligned_gaussians and pixel_aligned_predictions is not None and not only_mesh_gaussians
-
             B, HT, C = x.shape
             gaussian_predictions = dict()
             if use_mesh_gaussians:
-                positions, scales, rotations, colors, colors_sh, opacities = self._decode_gaussians(self._mlp_decoder, x, expression_codes=expression_codes)
+                positions, scales, rotations, colors, colors_sh, opacities = self._decode_gaussians(self._mlp_decoder, x)
                 gaussian_predictions['positions'] = positions
                 initial_positions = self._initial_gaussian_positions.repeat(B, 1, 1).repeat_interleave(self._config.n_gaussians_per_token, dim=1).to(
                     positions.dtype)
-                if self._config.use_flame_deformer and self._config.flame_deformer_type == 'pre':
-                    posed_flame_params = expression_codes_to_flame_params(expression_codes.flatten(0, 1))
-                    initial_positions, rotations = self._flame_deformer.forward(initial_positions, rotations, posed_flame_params)
-                if self._config.use_pixel3dmm_flame_deformer:
-                    deformed_position_map = self._flame_deformer.forward(expression_codes.flatten(0, 1))
-                    initial_positions = torch.nn.functional.grid_sample(
-                        deformed_position_map.permute(0, 3, 1, 2),
-                        self._uv_samples.repeat(deformed_position_map.shape[0], 1, 1, 1))[:, :, :, 0].permute(0, 2, 1)
 
                 positions = initial_positions + positions
-
-                if self._config.use_mesh_color_init:
-                    VT = B // input_images.shape[0]
-                    input_resolution = input_images.shape[-1]
-                    projected_points = torch.tensor(
-                        [project(initial_positions[0].cpu().float(), pose_list[0], intrinsics_list[0].rescale(input_resolution, inplace=False))
-                         for pose_list, intrinsics_list in zip(input_cam2worlds, input_intrinsics)], device=x.device, dtype=torch.float32)  # [B, G, 3]
-                    sample_positions = (projected_points[:, :, None, :2] / input_resolution * 2 - 1)
-                    extracted_colors = torch.nn.functional.grid_sample(input_images[:, 0], sample_positions)[..., 0]  # [B, 3, G]
-                    extracted_colors = (extracted_colors - 0.5) / C0
-                    colors = colors + extracted_colors.permute(0, 2, 1).repeat_interleave(VT, dim=0)
-
-            if use_pixel_aligned_gaussians:
-                b, v, c, h, w = pixel_aligned_predictions.shape
-                pixel_aligned_predictions = rearrange(pixel_aligned_predictions, 'b v c h w -> b (v h w) c')
-                positions_aligned, scales_aligned, rotations_aligned, colors_aligned, colors_sh_aligned, opacities_aligned = self._decode_gaussians(
-                    self._mlp_decoder_pixel_aligned_gaussians,
-                    pixel_aligned_predictions,
-                    h=h,
-                    v=v,
-                    perform_sampling=self._config.sample_aligned_gaussians,
-                    aligned=True,
-                    expression_codes=expression_codes)  # [B*E, V*H*W, D]
-
-                predicted_depth = None
-                if self._config.predict_depth:
-                    # TODO: Probably won't work with more n_gaussians_per_token
-                    predicted_depth = positions_aligned[..., 0]
-
-                res_aligned = int(sqrt(positions_aligned.shape[1] // self._config.n_gaussians_per_token / v))
-                xyz_init = get_unprojected_points(input_cam2worlds, input_intrinsics, res_aligned, x.dtype, x.device, predicted_depth=predicted_depth)
-                VT = x.shape[0] // input_images.shape[0]
-                # TODO: Back-projection with multiple input images is broken at the moment!!!
-
-                if self._config.use_color_skip:
-                    xs = torch.linspace(-1, 1, steps=res_aligned, device=x.device)
-                    ys = torch.linspace(-1, 1, steps=res_aligned, device=x.device)
-
-                    xs, ys = torch.meshgrid(xs, ys, indexing='ij')
-                    sampled_pixel_coords = torch.stack([ys, xs], dim=-1)
-                    sampled_pixel_coords = sampled_pixel_coords.unsqueeze(0).repeat(B, 1, 1, 1)
-                    sampled_input_rgb = torch.nn.functional.grid_sample(input_images[:, 0].repeat_interleave(VT, dim=0),
-                                                                        sampled_pixel_coords)  # TODO: Assuming single input image
-                    sampled_input_rgb = sampled_input_rgb.flatten(-2, -1).permute(0, 2, 1)  # [B, C, H, W] -> [B, H*W, C]
-                    sampled_input_rgb = (sampled_input_rgb - 0.5) / C0
-                    colors_aligned[..., :3] = colors_aligned[..., :3] + sampled_input_rgb
-
-                if self._config.predict_depth:
-                    positions_aligned = xyz_init
-                else:
-                    xyz_init = xyz_init.repeat_interleave(VT, dim=0).repeat_interleave(self._config.n_gaussians_per_token, dim=1)
-                    if self._config.use_flame_deformer and self._config.flame_deformer_type == 'pre':
-                        posed_flame_params = expression_codes_to_flame_params(expression_codes.flatten(0, 1))
-                        xyz_init, rotations_aligned = self._flame_deformer.forward(xyz_init, rotations_aligned, posed_flame_params)
-                    positions_aligned = positions_aligned + xyz_init
-
-                # import pyvista as pv
-                # from dreifus.pyvista import add_camera_frustum, add_coordinate_axes
-                # p = pv.Plotter()
-                # # p.add_points(xyz_init[0].detach().float().cpu().numpy(), color='blue')
-                # p.add_points(positions_aligned[0].detach().float().cpu().numpy(), scalars=colors_aligned[0].detach().float().cpu().numpy()[..., :3], rgb=True)
-                # p.add_points(positions[0].detach().float().cpu().numpy(), scalars=colors[0].detach().float().cpu().numpy()[..., :3], rgb=True)
-                # # p.add_points(self._initial_gaussian_positions[0].detach().float().cpu().numpy(), color='red')
-                # for pose, intr, input_image in zip(input_cam2worlds[0], input_intrinsics[0], input_images[0]):
-                #     input_image = input_image.permute(1, 2, 0).cpu().numpy()
-                #     add_camera_frustum(p, pose, intr.rescale(128, inplace=False), image=input_image)
-                # add_coordinate_axes(p, scale=0.1)
-                # p.show()
-
-                if use_mesh_gaussians:
-                    positions = torch.cat([positions, positions_aligned], dim=1)
-                    scales = torch.cat([scales, scales_aligned], dim=1)
-                    rotations = torch.cat([rotations, rotations_aligned], dim=1)
-                    colors = torch.cat([colors, colors_aligned], dim=1)
-                    opacities = torch.cat([opacities, opacities_aligned], dim=1)
-
-                    if self._config.sh_degree > 0:
-                        colors_sh = torch.cat([colors_sh, colors_sh_aligned], dim=1)
-                else:
-                    positions = positions_aligned
-                    scales = scales_aligned
-                    rotations = rotations_aligned
-                    colors = colors_aligned
-                    opacities = opacities_aligned
-
-                    if self._config.sh_degree > 0:
-                        colors_sh = colors_sh_aligned
-
-            if self._config.use_flame_deformer and self._config.flame_deformer_type == 'post':
-                posed_flame_params = expression_codes_to_flame_params(expression_codes.flatten(0, 1))
-                positions, rotations = self._flame_deformer.forward(positions, rotations, posed_flame_params)
 
             B = x.shape[0]
 
@@ -1067,16 +855,11 @@ class GaussianHeadLRMConfig(Config):
     compute_headpose_sh: bool = False
     normalize_images: bool = False
     encode_images_separately: bool = False
-    use_clean_image_encoder: bool = False  # remove
-    use_residual_encoder: bool = False  # remove
-    use_dpr_lighting: bool = False  # remove
     residual_downsample: int = 4  # Ensure target images cannot leak too much by forcing downsampling
     n_layers_residual_encoder: int = 4
-    use_prope: bool = False  # remove
     use_plucker: bool = False
     use_rppc: bool = False  # Reference-Point Plucker Coordinates
 
-    use_neural_renderer: bool = False  # remove
     compile: bool = False
     use_gsplat: bool = False
 
@@ -1115,22 +898,22 @@ class GaussianHeadLRM(nn.Module):
                                         stride=config.patch_size,
                                         bias=False)
 
-        if config.head_transformer.use_gpt or config.head_transformer.use_lam_transformer:
+        if config.head_transformer.use_lam_transformer:
             # TODO: We are also using a GPT transformer encoder even when we use a LAM TransformerDecoder
             gpt_config = GPTConfig(
                 block_size=(512 // config.patch_size) ** 2 * config.n_input_views,  # TODO: Here we assume input images will be 512x512 resolution
                 n_layer=config.n_layers_encoder,
                 n_head=config.head_transformer.transformer.n_heads,
                 n_embd=config.head_transformer.transformer.d_hidden,
-                use_adaptive_layer_norm=config.head_transformer.use_adaptive_layer_norm,
-                init_adaptive_layer_norm_identity=config.head_transformer.init_adaptive_layer_norm_identity,
+                use_adaptive_layer_norm=False,
+                init_adaptive_layer_norm_identity=False,
                 use_repa=config.head_transformer.use_repa,
                 repa_layer=config.head_transformer.repa_layer,
                 d_repa_target=config.head_transformer.d_repa_target,
                 use_post_layer_norm=config.head_transformer.use_transformer_encoder_ln,
                 n_merged_views=1 if config.encode_images_separately else config.n_input_views,
                 use_causal_attention=config.head_transformer.transformer.use_causal_attention,
-                use_prope=config.use_prope,
+                use_prope=False,
                 patch_size=config.patch_size
             )
             self._transformer_encoder = GPT(gpt_config)
@@ -1138,54 +921,12 @@ class GaussianHeadLRM(nn.Module):
             transformer_encoder_config = replace(config.head_transformer.transformer, n_layers=config.n_layers_encoder, use_alternating_self_attention=False)
             self._transformer_encoder = Transformer(transformer_encoder_config)
 
-        if config.use_clean_image_encoder:
-            if config.head_transformer.use_gpt:
-                self._transformer_encoder_clean = GPT(gpt_config)
-            else:
-                self._transformer_encoder_clean = Transformer(transformer_encoder_config)
-
-        if config.use_residual_encoder:
-            self._conv_patchify_residual = nn.Conv2d(in_channels=3, out_channels=config.head_transformer.transformer.d_hidden,
-                                                     kernel_size=config.patch_size,
-                                                     stride=config.patch_size,
-                                                     bias=False)
-
-            residual_encoder_config = replace(config.head_transformer.transformer, n_layers=config.n_layers_residual_encoder,
-                                              use_alternating_self_attention=False)
-            self._residual_encoder = Transformer(residual_encoder_config)
-
-            self._residual_compression_mlp = MLP(config.head_transformer.transformer.d_hidden,
-                                                 [256] * 2 + [config.head_transformer.d_residual_codes],
-                                                 activation_layer=torch.nn.ReLU)
-
-        if config.use_dpr_lighting:
-            self._dpr = DPR()
-
-            # def param_to_buffer(module):
-            #     """Turns all parameters of a module into buffers."""
-            #     modules = module.modules()
-            #     module = next(modules)
-            #     for name, param in dict(module.named_parameters(recurse=False)).items():
-            #         delattr(module, name)  # Unregister parameter
-            #         module.register_buffer(name, param, persistent=False)
-            #     for name, param in dict(module._buffers.items()).items():
-            #         delattr(module, name)  # There could be persistable buffers. Replace them with non-persistable ones
-            #         module.register_buffer(name, param, persistent=False)
-            #     for module in modules:
-            #         param_to_buffer(module)
-            #
-            # param_to_buffer(self._dpr)
-
         self._head_transformer = HeadTransformer(config.head_transformer)
-        if not config.head_transformer.use_point_generator:
-            self._gaussian_decoder = GaussianDecoder(config.gaussian_decoder)
+        self._gaussian_decoder = GaussianDecoder(config.gaussian_decoder)
 
         if config.use_feature_projection:
             self._feature_projection = nn.Linear(config.head_transformer.transformer.d_hidden + config.feature_dim,
                                                  config.head_transformer.transformer.d_hidden)
-
-        if config.use_neural_renderer:
-            self._neural_renderer = CNNDecoder(32, 3)
 
         if config.compile and platform.system() == 'Linux':
             self.create_gaussian_models = torch.compile(self.create_gaussian_models, mode='reduce-overhead')
@@ -1195,13 +936,9 @@ class GaussianHeadLRM(nn.Module):
         self.register_buffer("_device_indicator", torch.empty(0), persistent=False)
 
     def to(self, *args, **kwargs):
-        if self._config.use_dpr_lighting:
-            self._dpr.to(*args, **kwargs)
         return super().to(*args, **kwargs)
 
     def cuda(self: T, device: Optional[Union[int, device]] = None) -> T:
-        if self._config.use_dpr_lighting:
-            self._dpr.cuda()
         return super().cuda(device)
 
     @property
@@ -1287,23 +1024,11 @@ class GaussianHeadLRM(nn.Module):
                     x = rearrange(x, '(v h w) b c -> b v c h w', v=V, h=H_p, w=W_p)
 
                 # encode image tokens
-                if self._config.use_clean_image_encoder:
-                    # TODO: We are assuming that all batch elements have the same number of noisy and clean views
-                    VN = (input_view_mask[0] == 0).sum()
-                    VC = (input_view_mask[0] == 1).sum()
-                    xs = [x[input_view_mask == 0].unflatten(0, (B, VN)), x[input_view_mask == 1].unflatten(0, (B, VC))]
-                    conditions = [condition[input_view_mask == 0].unflatten(0, (B, VN)), condition[input_view_mask == 1].unflatten(0, (B, VC))]
-                else:
-                    xs = [x]
-                    conditions = [condition]
+                xs = [x]
+                conditions = [condition]
 
-                if self._config.use_prope:
-                    # PRoPe expects world2cam poses
-                    prope_poses = torch.tensor([[pose.invert() for pose in pose_list] for pose_list in input_cam2worlds], device=x.device)
-                    prope_intrinsics = torch.tensor(input_intrinsics, device=x.device)
-                else:
-                    prope_poses = None
-                    prope_intrinsics = None
+                prope_poses = None
+                prope_intrinsics = None
 
                 if self._config.encode_images_separately:
                     xs = [rearrange(x, 'b v c h w -> (h w) (b v) c') for x in xs]
@@ -1312,23 +1037,10 @@ class GaussianHeadLRM(nn.Module):
                     xs = [rearrange(x, 'b v c h w -> (v h w) b c') for x in xs]
                     conditions_encoder = conditions
 
-                if self._config.use_clean_image_encoder:
-                    # TODO: PRoPe poses/intrinsics are missing here
-                    if self._config.head_transformer.use_repa:
-                        x_noisy, x_repa_noisy = self._transformer_encoder(xs[0], condition=conditions_encoder[0])
-                        x_clean, x_repa_clean = self._transformer_encoder_clean(xs[1], condition=conditions_encoder[1])
-                        x_repa = torch.cat([x_repa_noisy.unflatten(0, (B, VN)), x_repa_clean.unflatten(0, (B, VC))], dim=1).flatten(0, 1)
-                    else:
-                        x_noisy = self._transformer_encoder(xs[0], condition=conditions_encoder[0])
-                        x_clean = self._transformer_encoder_clean(xs[1], condition=conditions_encoder[1])
-
-                    # x = torch.cat([x_noisy, x_clean], dim=1)
-                    x = torch.cat([x_noisy.unflatten(1, (B, VN)), x_clean.unflatten(1, (B, VC))], dim=2).flatten(1, 2)
+                if self._config.head_transformer.use_repa:
+                    x, x_repa = self._transformer_encoder(xs[0], condition=conditions_encoder[0], poses=prope_poses, intrinsics=prope_intrinsics)
                 else:
-                    if self._config.head_transformer.use_repa:
-                        x, x_repa = self._transformer_encoder(xs[0], condition=conditions_encoder[0], poses=prope_poses, intrinsics=prope_intrinsics)
-                    else:
-                        x = self._transformer_encoder(xs[0], condition=conditions_encoder[0], poses=prope_poses, intrinsics=prope_intrinsics)
+                    x = self._transformer_encoder(xs[0], condition=conditions_encoder[0], poses=prope_poses, intrinsics=prope_intrinsics)
 
                 if self._config.encode_images_separately:
                     x = rearrange(x, '(h w) (b v) c -> (v h w) b c', h=H_p, w=W_p, b=B, v=V)
@@ -1350,31 +1062,20 @@ class GaussianHeadLRM(nn.Module):
                 cached_internal_representations=cached_internal_representations,
                 only_internal_representations=only_internal_representations)
 
-            if self._config.head_transformer.use_point_generator:
-                gaussian_models = x
-                gaussian_predictions = None
-            else:
+            if only_internal_representations:
+                return GaussianModelsOutput(None, None, x_repa, internal_representations, vae_output)
 
-                if only_internal_representations:
-                    return GaussianModelsOutput(None, None, x_repa, internal_representations, vae_output)
+            x = rearrange(x, 'g b c -> b g c')
+            if pixel_aligned_predictions is not None:
+                pixel_aligned_predictions = rearrange(pixel_aligned_predictions, '(v h w) b c -> b v c h w', v=V, h=H_p, w=W_p)
 
-                x = rearrange(x, 'g b c -> b g c')
-                if pixel_aligned_predictions is not None:
-                    pixel_aligned_predictions = rearrange(pixel_aligned_predictions, '(v h w) b c -> b v c h w', v=V, h=H_p, w=W_p)
+            # Decode into Gaussian Attributes
 
-                # input_cam2worlds = torch.tensor(np.stack(input_cam2worlds), dtype=x.dtype, device=x.device) if input_cam2worlds is not None else None
-                # input_intrinsics = torch.tensor(np.stack(input_intrinsics), dtype=x.dtype, device=x.device) if input_intrinsics is not None else None
-                # Decode into Gaussian Attributes
-
-                if not self._config.gaussian_decoder.use_gaussians:
-                    VN = (input_view_mask[0] == 0).sum()
-                    pixel_aligned_predictions = pixel_aligned_predictions[input_view_mask == InputType.NOISY].unflatten(0, (B, VN))
-
-                gaussian_models, gaussian_predictions = self._gaussian_decoder(
-                    x, pixel_aligned_predictions,
-                    input_cam2worlds=input_cam2worlds, input_intrinsics=input_intrinsics, input_images=images,
-                    only_mesh_gaussians=only_mesh_gaussians, only_pixel_aligned_gaussians=only_pixel_aligned_gaussians,
-                    return_uv_attributes=return_uv_attributes, expression_codes=expression_codes)
+            gaussian_models, gaussian_predictions = self._gaussian_decoder(
+                x, pixel_aligned_predictions,
+                input_cam2worlds=input_cam2worlds, input_intrinsics=input_intrinsics, input_images=images,
+                only_mesh_gaussians=only_mesh_gaussians, only_pixel_aligned_gaussians=only_pixel_aligned_gaussians,
+                return_uv_attributes=return_uv_attributes, expression_codes=expression_codes)
 
         if self._config.gaussian_decoder.use_gaussians:
             if self._config.use_bfloat16:
@@ -1421,9 +1122,6 @@ class GaussianHeadLRM(nn.Module):
             else:
                 render_bg_colors = torch.cat([render_bg_colors, -1 * torch.ones_like(render_bg_colors)],
                                              dim=-1)  # Background has fix the smallest possible variance
-
-        if self._config.use_neural_renderer:
-            render_bg_colors = torch.cat([render_bg_colors, torch.zeros((render_bg_colors.shape[0], 32 - len(render_bg_colors)), device=self.device)], dim=-1)
 
         rendered_images = []
         all_gaussian_models = []
@@ -1500,13 +1198,7 @@ class GaussianHeadLRM(nn.Module):
         else:
             rendered_images = torch.stack(rendered_images)
 
-        if self._config.use_neural_renderer:
-            B, VT, C, H, W = rendered_images.shape
-            rgb_images = self._neural_renderer(rendered_images.flatten(0, 1))
-            rgb_images = rgb_images.unflatten(0, (B, VT))
-            output = RenderingOutput(rgb_images, rendered_raw_images=rendered_images)
-        else:
-            output = RenderingOutput(rendered_images)
+        output = RenderingOutput(rendered_images)
 
         return output
 
@@ -1581,25 +1273,7 @@ class GaussianHeadLRM(nn.Module):
         return rendering_output.rendered_images
 
     def forward_residual_encoder(self, images: torch.Tensor) -> torch.Tensor:
-        residual_codes = None
-        if self._config.use_dpr_lighting:
-            B, VT, _, _, _ = images.shape
-            x = images.flatten(0, 1) * 2 - 1
-            with torch.no_grad():
-                sh = self._dpr.extract_lighting(x)[:, :, 0, 0]  # [B*VT, 9]
-            residual_codes = sh.reshape(B, VT, 1, 9)
-        elif self._config.use_residual_encoder:
-            # Compute residual codes from target images
-            B, VT, _, _, _ = images.shape
-            x = images.flatten(0, 1)
-            x = interpolate(x, scale_factor=1 / self._config.residual_downsample)
-            x = self._conv_patchify_residual(x)
-            x = rearrange(x, 'bv c h w -> (h w) bv c')
-            residual_codes = self._residual_encoder(x)
-            residual_codes = self._residual_compression_mlp(residual_codes)
-            residual_codes = residual_codes.permute(1, 0, 2).unflatten(0, (B, VT))  # [B, VT, T, D_res]
-
-        return residual_codes
+        return None
 
     def forward(self,
                 batch: GaussianHeadLRMBatch,

@@ -402,13 +402,3 @@ class GaussianHeadLRMBatch:
                 value = value.pin_memory()
                 setattr(self, f.name, value)
         return self
-
-
-class InputType(IntEnum):
-    NOISY = 0
-    CLEAN = 1
-
-
-class RenderType(IntEnum):
-    DIFFUSION = 0
-    NV = 1

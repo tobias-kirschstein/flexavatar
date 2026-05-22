@@ -4,15 +4,28 @@
 #       Otherwise, only some of the are installed, because conda creates a temporary requirements.txt file
 #       only the last -pip section
 
-name: PROJECT_NAME
+name: flexavatar
 
 channels:
-  - conda-forge
+  - nvidia/label/cuda-11.8.0
 
 dependencies:
-  - python=3.8
+  - python=3.9
   - pip
   - jupyterlab
 
+  - cuda-toolkit
+  - cuda-nvcc  # for nvcc
+  - cuda-cudart-dev  # for cuda_runtime.h
+  - libcusparse-dev  # For StyleGAN kernels
+  - libcublas-dev
+  - libcusolver-dev
+
   - pip:
-    # All pip dependencies
+      - dreifus
+      - --extra-index-url https://download.pytorch.org/whl/cu118
+      - torch
+      - torchvision
+      - einops
+      - git+https://github.com/tobias-kirschstein/stylegan-generators.git
+      - gaussian_splatting@git+https://github.com/tobias-kirschstein/gaussian-splatting.git

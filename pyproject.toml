@@ -3,9 +3,9 @@ requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "<<<ENTER_PACKAGE_NAME>>>"  # DON'T FORGET TO REMOVE empty FROM git remote!!!
+name = "flexavatar"  # DON'T FORGET TO REMOVE empty FROM git remote!!!
 version = "0.0.1"
-description = "<<<ENTER_DESCRIPTION>>>"
+description = "[CVPR '26] Official Release of FlexAvatar"
 authors = [
     { name = "Tobias Kirschstein", email = "tobias.kirschstein@gmail.com" },
 ]
@@ -32,4 +32,4 @@ dev = [
 
 [tool.setuptools.packages.find]
 where = ["src"]
-include = ["<<<ENTER_PACKAGE_NAME>>>*"]  # Keep the '*', otherwise submodules are not found
+include = ["flexavatar*"]  # Keep the '*', otherwise submodules are not found

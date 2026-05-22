@@ -55,10 +55,10 @@ class GaussianDecoderConfig(Config):
     use_head_tokens: bool = True
     oversampling_factor: int = 1  # By how much generated (uv)-textures should be oversampled to spawn Gaussians
     use_lam_gs_decoder: bool = False
-    use_gaussians: bool = True  # If False, simply decode 1 pixel value per pixel_aligned_token
     sh_degree: int = 0
     head_template: str = 'gghead_template'
     d_expression_codes: Optional[int] = None
+
 
 @dataclass
 class GaussianHeadLRMConfig(Config):
@@ -94,6 +94,7 @@ class GaussianModelsOutput:
 class GaussianHeadLRMOutput:
     gaussian_models_output: GaussianModelsOutput
     rendering_output: RenderingOutput
+
 
 def sample_template_positions(resolution: int, template_name: str = 'gghead_template') -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     template_mesh = load_mesh(f"{ASSETS_PATH}/{template_name}.obj")
@@ -262,12 +263,7 @@ class GaussianDecoder(nn.Module):
         if config.use_norm_before_mlp:
             self._layer_norm = LayerNorm(mlp_d_in)
 
-        if config.use_gaussians:
-            self._mlp_decoder = self.create_mlp_decoder(config, mlp_d_in)
-        else:
-            self._mlp_decoder = MLP(mlp_d_in, [config.d_hidden] * (config.n_mlp_layers - 1) + [config.n_channels_color],
-                                    activation_layer=GELU)
-            self._out_activation = nn.Sigmoid()
+        self._mlp_decoder = self.create_mlp_decoder(config, mlp_d_in)
 
         if config.head_transformer_type == HeadTransformerType.MESH_TOKENS:
             initial_gaussian_positions, uv_samples, _ = sample_template_positions(config.res_head_tokens, config.head_template)
@@ -292,11 +288,10 @@ class GaussianDecoder(nn.Module):
         else:
             raise ValueError(f"Unknown head transformer type: {config.head_transformer_type}")
 
-        if config.use_gaussians:
-            initial_gaussian_positions = initial_gaussian_positions[None]  # [1, G, 3]
-            uv_samples = uv_samples[None, :, None]  # [1, G, 1, 2]
-            self.register_buffer("_initial_gaussian_positions", initial_gaussian_positions, persistent=False)
-            self.register_buffer("_uv_samples", uv_samples, persistent=False)
+        initial_gaussian_positions = initial_gaussian_positions[None]  # [1, G, 3]
+        uv_samples = uv_samples[None, :, None]  # [1, G, 1, 2]
+        self.register_buffer("_initial_gaussian_positions", initial_gaussian_positions, persistent=False)
+        self.register_buffer("_uv_samples", uv_samples, persistent=False)
 
         self.register_buffer("_device_indicator", torch.empty(0), persistent=False)
 
@@ -404,41 +399,40 @@ class GaussianDecoder(nn.Module):
                 x: torch.Tensor,
                 return_uv_attributes: bool = False) -> Tuple[List[GaussianModel], Dict[str, torch.Tensor]]:
 
-        if self._config.use_gaussians:
-            use_mesh_gaussians = self._config.use_head_tokens
-            B, HT, C = x.shape
-            gaussian_predictions = dict()
-            if use_mesh_gaussians:
-                positions, scales, rotations, colors, colors_sh, opacities = self._decode_gaussians(self._mlp_decoder, x)
-                gaussian_predictions['positions'] = positions
-                initial_positions = self._initial_gaussian_positions.repeat(B, 1, 1).repeat_interleave(self._config.n_gaussians_per_token, dim=1).to(
-                    positions.dtype)
+        use_mesh_gaussians = self._config.use_head_tokens
+        B, HT, C = x.shape
+        gaussian_predictions = dict()
+        if use_mesh_gaussians:
+            positions, scales, rotations, colors, colors_sh, opacities = self._decode_gaussians(self._mlp_decoder, x)
+            gaussian_predictions['positions'] = positions
+            initial_positions = self._initial_gaussian_positions.repeat(B, 1, 1).repeat_interleave(self._config.n_gaussians_per_token, dim=1).to(
+                positions.dtype)
 
-                positions = initial_positions + positions
+            positions = initial_positions + positions
 
-            B = x.shape[0]
+        B = x.shape[0]
 
-            gaussian_models = []
-            for i in range(B):
-                gaussian_model = GaussianModel(sh_degree=self._config.sh_degree)
-                gaussian_model.active_sh_degree = self._config.sh_degree
-                if self._config.use_lam_gs_decoder:
-                    gaussian_model.opacity_activation = Identity()
-                    gaussian_model.inverse_opacity_activation = Identity()
-                    gaussian_model.scaling_activation = Identity()
-                    gaussian_model.scaling_inverse_activation = Identity()
-                gaussian_model._xyz = positions[i]
-                gaussian_model._scaling = scales[i]
-                gaussian_model._rotation = rotations[i]
-                gaussian_model._features_dc = colors[i, :, None]
-                gaussian_model._opacity = opacities[i]
+        gaussian_models = []
+        for i in range(B):
+            gaussian_model = GaussianModel(sh_degree=self._config.sh_degree)
+            gaussian_model.active_sh_degree = self._config.sh_degree
+            if self._config.use_lam_gs_decoder:
+                gaussian_model.opacity_activation = Identity()
+                gaussian_model.inverse_opacity_activation = Identity()
+                gaussian_model.scaling_activation = Identity()
+                gaussian_model.scaling_inverse_activation = Identity()
+            gaussian_model._xyz = positions[i]
+            gaussian_model._scaling = scales[i]
+            gaussian_model._rotation = rotations[i]
+            gaussian_model._features_dc = colors[i, :, None]
+            gaussian_model._opacity = opacities[i]
 
-                if self._config.sh_degree == 0:
-                    gaussian_model._features_rest = torch.empty(
-                        (gaussian_model._features_dc.shape[0], 0, gaussian_model._features_dc.shape[2]), device=self.device)
-                else:
-                    gaussian_model._features_rest = colors_sh[i]
-                gaussian_models.append(gaussian_model)
+            if self._config.sh_degree == 0:
+                gaussian_model._features_rest = torch.empty(
+                    (gaussian_model._features_dc.shape[0], 0, gaussian_model._features_dc.shape[2]), device=self.device)
+            else:
+                gaussian_model._features_rest = colors_sh[i]
+            gaussian_models.append(gaussian_model)
 
         gaussian_predictions['all_positions'] = positions
         gaussian_predictions['all_scales'] = scales
@@ -515,11 +509,8 @@ class GaussianHeadLRM(nn.Module):
                                input_intrinsics: Optional[List[List[Intrinsics]]] = None,
                                expression_codes: Optional[torch.Tensor] = None,
                                dataset_ids: Optional[torch.Tensor] = None,
-                               condition: Optional[torch.Tensor] = None,
                                input_view_mask: Optional[torch.Tensor] = None,
                                cached_internal_representations: Optional[torch.Tensor] = None,
-                               only_mesh_gaussians: bool = False,
-                               only_pixel_aligned_gaussians: bool = False,
                                only_internal_representations: bool = False,
                                return_uv_attributes: bool = False) -> GaussianModelsOutput:
 
@@ -527,8 +518,6 @@ class GaussianHeadLRM(nn.Module):
         B, V, _, H, W = images.shape
         H_p = H // self._config.patch_size
         W_p = W // self._config.patch_size
-
-        x_repa = None
 
         with torch.autocast(device_type='cuda', dtype=torch.bfloat16,
                             enabled=self._config.use_bfloat16):
@@ -542,7 +531,6 @@ class GaussianHeadLRM(nn.Module):
                     x = torch.cat([x, input_plucker_embeddings], dim=2)
 
                 x = x.flatten(0, 1)
-                # x = images[:, 0]  # TODO: Currently assuming single input image
                 # Use conv to patchify images into image tokens
 
                 x = self._conv_patchify(x)  # [B*V, D, H_p, W_p]
@@ -605,32 +593,26 @@ class GaussianHeadLRM(nn.Module):
 
             gaussian_models, gaussian_predictions = self._gaussian_decoder(x, return_uv_attributes=return_uv_attributes)
 
-        if self._config.gaussian_decoder.use_gaussians:
-            if self._config.use_bfloat16:
-                for gaussian_model in gaussian_models:
-                    gaussian_model._xyz = gaussian_model._xyz.to(torch.float32)
-                    gaussian_model._scaling = gaussian_model._scaling.to(torch.float32)
-                    gaussian_model._rotation = gaussian_model._rotation.to(torch.float32)
-                    gaussian_model._features_dc = gaussian_model._features_dc.to(torch.float32)
-                    gaussian_model._features_rest = gaussian_model._features_rest.to(torch.float32)
-                    gaussian_model._opacity = gaussian_model._opacity.to(torch.float32)
+        if self._config.use_bfloat16:
+            for gaussian_model in gaussian_models:
+                gaussian_model._xyz = gaussian_model._xyz.to(torch.float32)
+                gaussian_model._scaling = gaussian_model._scaling.to(torch.float32)
+                gaussian_model._rotation = gaussian_model._rotation.to(torch.float32)
+                gaussian_model._features_dc = gaussian_model._features_dc.to(torch.float32)
+                gaussian_model._features_rest = gaussian_model._features_rest.to(torch.float32)
+                gaussian_model._opacity = gaussian_model._opacity.to(torch.float32)
 
-            if expression_codes is None:
-                gaussian_models_per_person = [[gaussian_model] for gaussian_model in gaussian_models]
-            else:
-                VT = expression_codes.shape[1]
-                gaussian_models_per_person = [gaussian_models[i * VT: (i + 1) * VT] for i in range(B)]
-
-            gaussian_models_output = GaussianModelsOutput(gaussian_models_per_person, gaussian_predictions, internal_representations=internal_representations)
+        if expression_codes is None:
+            gaussian_models_per_person = [[gaussian_model] for gaussian_model in gaussian_models]
         else:
-            gaussian_models_output = GaussianModelsOutput(gaussian_models, gaussian_predictions, internal_representations=internal_representations)
+            VT = expression_codes.shape[1]
+            gaussian_models_per_person = [gaussian_models[i * VT: (i + 1) * VT] for i in range(B)]
+
+        gaussian_models_output = GaussianModelsOutput(gaussian_models_per_person, gaussian_predictions, internal_representations=internal_representations)
 
         return gaussian_models_output
 
     def render(self, gaussian_models: List[List[GaussianModel]], batch: GaussianHeadLRMBatch, use_gsplat: Optional[bool] = None) -> RenderingOutput:
-        if not self._config.gaussian_decoder.use_gaussians:
-            return RenderingOutput(gaussian_models)
-
         if isinstance(batch.render_resolution[0], int):
             img_w = batch.render_resolution[0]
             img_h = batch.render_resolution[0]
@@ -666,10 +648,6 @@ class GaussianHeadLRM(nn.Module):
                     all_render_bg_colors.append(render_bg_colors[i])
                 else:
                     render_output = render_distwar(render_cam, gaussian_model, PipelineParams2(), render_bg_colors[i], override_color=override_color)
-                    # render_output = render_gsplat(render_cam, gaussian_model, render_bg_color, override_color=override_color)
-                    # render_output = render(render_cam, gaussian_model, PipelineParams2(convert_SHs_python=override_color is None), render_bg_color,
-                    #                        override_color=override_color)  # TamingGS apparently has some issue with back-propagating color when SHs are computed in CUDA...
-
                     rendered_image = render_output['render']
 
                     rendered_images_single.append(rendered_image)
@@ -691,69 +669,8 @@ class GaussianHeadLRM(nn.Module):
 
         return output
 
-    def render_uv(self, gaussian_models: List[List[GaussianModel]], batch: GaussianHeadLRMBatch, include_transparent_gaussians: bool = False) -> torch.Tensor:
-        # previous_colors = []
-        gaussian_models_uv = []
-
-        def create_random_cameras(n: int):
-            random_cam2worlds = []
-            for _ in range(n):
-                distance = 0.8
-                angle_range_x = np.pi
-                angle_range_y = np.pi / 8
-                random_angle_x = angle_range_x * (np.random.random() * 2 - 1)
-                random_angle_y = angle_range_y * (np.random.random() * 2 - 1)
-                random_x = np.sin(random_angle_x) * distance
-                random_y = np.sin(random_angle_y) * distance
-                random_z = np.sqrt(distance - random_x ** 2 - random_y ** 2)
-                if np.random.random() > 0.5:
-                    # Camera look from the back of the head
-                    random_z = -random_z
-                # random_x, random_y = np.random.random(2) * 2 - 1
-                random_cam2world = Pose(pose_type=PoseType.CAM_2_WORLD)
-                random_cam2world.move(random_x, random_y, random_z)
-                random_cam2world.look_at(Vec3(), up=Vec3(0, 1, 0))
-                random_cam2worlds.append(random_cam2world)
-
-            return random_cam2worlds
-
-        for b in range(len(gaussian_models)):
-            single_previous_colors = []
-            single_gaussian_models_uv = []
-            for v in range(len(gaussian_models[b])):
-                # single_previous_colors.append(gaussian_models[b][v]._features_dc)
-                uv_colors = self._gaussian_decoder._uv_samples.squeeze(0)  # [G, 2]
-                uv_colors = torch.concatenate(
-                    [uv_colors, torch.zeros((uv_colors.shape[0], 1, 1), device=self.device), -torch.ones((uv_colors.shape[0], 1, 1), device=self.device)],
-                    dim=-1)  # [G, 4]
-                uv_colors = (uv_colors - 0.5) / C0
-                # gaussian_models[b][v]._features_dc = uv_colors
-
-                gaussian_model = gaussian_models[b][v]
-                gm = GaussianModel(0)
-                gm._xyz = torch.cat([gaussian_model._xyz, torch.tensor([[0, 0, -0.07]], device=self.device)])
-                gm._scaling = torch.cat([gaussian_model._scaling, torch.tensor([[0.08, 0.05, 0.04]], device=self.device) / 2])
-                gm._rotation = torch.cat([gaussian_model._rotation, torch.ones((1, 4), device=self.device)])
-                gm._features_dc = torch.cat([uv_colors, (torch.tensor([[[0, 0, 1, -1]]], device=self.device) - 0.5) / C0])
-                gm._features_rest = torch.empty((gm._xyz.shape[0], 0, 4), device=self.device)
-                gm._opacity = torch.cat([gaussian_model._opacity, torch.ones((1, 1), device=self.device)])
-                gm.scaling_activation = gaussian_model.scaling_activation
-                gm.opacity_activation = gaussian_model.opacity_activation
-                single_gaussian_models_uv.append(gm)
-
-            gaussian_models_uv.append(single_gaussian_models_uv)
-
-        batch_uv = replace(batch, render_bg_color=[(255, 255, 255, 255) for _ in range(batch.B)],
-                           render_cam2world_poses=[create_random_cameras(batch.VT) for b in range(batch.B)])
-        rendering_output = self.render(gaussian_models_uv, batch_uv, use_gsplat=False)
-
-
-        return rendering_output.rendered_images
-
-
     def forward(self,
                 batch: GaussianHeadLRMBatch,
-                condition: Optional[torch.Tensor] = None,
                 cached_internal_representations: Optional[torch.Tensor] = None,
                 only_internal_representations: bool = False,
                 only_gaussian_models: bool = False,
@@ -763,7 +680,6 @@ class GaussianHeadLRM(nn.Module):
                                                              features=batch.features,
                                                              input_cam2worlds=batch.input_cam2worlds,
                                                              input_intrinsics=batch.input_intrinsics,
-                                                             condition=condition,
                                                              input_view_mask=batch.input_view_mask,
                                                              expression_codes=batch.expression_codes,
                                                              dataset_ids=batch.dataset_ids,

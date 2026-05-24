@@ -33,3 +33,4 @@ dependencies:
       - gaussian_splatting@git+https://github.com/tobias-kirschstein/gaussian-splatting.git
       - modnet@git+https://github.com/tobias-kirschstein/MODNet.git
       - diffusers
+      - mediapy

@@ -1,5 +1,5 @@
 import platform
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from typing import Optional, List, Tuple, Union, Dict
 
 import numpy as np
@@ -13,10 +13,15 @@ from gaussian_splatting.arguments import PipelineParams2
 from gaussian_splatting.gaussian_renderer import render_distwar, render_gsplat_batched
 from gaussian_splatting.scene import GaussianModel
 from gaussian_splatting.scene.cameras import pose_to_rendercam
-from gaussian_splatting.utils.sh_utils import C0, eval_sh
+from torch import nn
+from torch.nn import GELU, LayerNorm, PixelShuffle, Identity
+from torch.nn.modules.module import T
+from torchvision.ops import MLP
+from trimesh import load_mesh
 
-from flexavatar.config.dataset_config import DATASET_ID_MAPPING, GaussianHeadLRMBatch, MVDatasetConfig
-from flexavatar.config.flexavatar_config import HeadTransformerConfig, HeadTransformerType, CrossAttentionType, TransformerConfig
+from flexavatar.config.dataset_config import GaussianHeadLRMBatch, MVDatasetConfig
+from flexavatar.config.flexavatar_config import HeadTransformerConfig, HeadTransformerType, CrossAttentionType
+from flexavatar.data_adapter.nersemble_data_adapter import NeRSembleDataAdapter
 from flexavatar.env import ASSETS_PATH
 from flexavatar.model.flexavatar_preprocessor import GaussianHeadLRMPreprocessor
 from flexavatar.model.lam_gs_layer import GSLayer
@@ -26,11 +31,6 @@ from flexavatar.model.nanogpt import GPTConfig, GPT
 from flexavatar.model.stylegan_upsampler import StyleGANUpsamplerConfig, StyleGANPixelShuffleUpsampler
 from flexavatar.util.plucker import plucker_embedder
 from flexavatar.util.uv import gen_tritex
-from torch import nn, device
-from torch.nn import GELU, LayerNorm, PixelShuffle, Identity
-from torch.nn.modules.module import T
-from torchvision.ops import MLP
-from trimesh import load_mesh
 
 
 @dataclass
@@ -144,7 +144,6 @@ class HeadTransformer(nn.Module):
 
         initial_gaussian_positions, _, position_map = sample_template_positions(config.res_head_tokens, config.head_template)
 
-        # self._head_token_embeddings = nn.Parameter(torch.zeros((config.res_head_tokens ** 2, 1, config.transformer.d_hidden)))  # [HT, 1, D]
         if config.head_transformer_type == HeadTransformerType.MESH_TOKENS:
             self._head_token_embeddings = nn.Parameter(torch.zeros((len(initial_gaussian_positions), 1, config.transformer.d_hidden)))  # [HT, 1, D]
             initial_head_xyz = initial_gaussian_positions[None]
@@ -323,7 +322,7 @@ class GaussianDecoder(nn.Module):
         B, HT, C = x.shape
 
         if self._config.head_transformer_type == HeadTransformerType.MESH_TOKENS:
-            x = self._layer_norm(x)  # TODO: Should we use layer norm here?
+            x = self._layer_norm(x)
             x = mlp_decoder(x)  # [B, HT, G * D_G]
             # x = self._mlp_decoder(self._dummy_tokens)
             x = rearrange(x, 'b t (g d) -> b (t g) d', g=self._config.n_gaussians_per_token)
@@ -465,9 +464,8 @@ class GaussianHeadLRM(nn.Module):
                                         bias=False)
 
         if config.head_transformer.use_lam_transformer:
-            # TODO: We are also using a GPT transformer encoder even when we use a LAM TransformerDecoder
             gpt_config = GPTConfig(
-                block_size=(512 // config.patch_size) ** 2 * config.n_input_views,  # TODO: Here we assume input images will be 512x512 resolution
+                block_size=(512 // config.patch_size) ** 2 * config.n_input_views,
                 n_layer=config.n_layers_encoder,
                 n_head=config.head_transformer.transformer.n_heads,
                 n_embd=config.head_transformer.transformer.d_hidden,
@@ -495,7 +493,7 @@ class GaussianHeadLRM(nn.Module):
     def to(self, *args, **kwargs):
         return super().to(*args, **kwargs)
 
-    def cuda(self: T, device: Optional[Union[int, device]] = None) -> T:
+    def cuda(self: T, device: Optional[Union[int, torch.device]] = None) -> T:
         return super().cuda(device)
 
     @property
@@ -509,7 +507,6 @@ class GaussianHeadLRM(nn.Module):
                                input_intrinsics: Optional[List[List[Intrinsics]]] = None,
                                expression_codes: Optional[torch.Tensor] = None,
                                dataset_ids: Optional[torch.Tensor] = None,
-                               input_view_mask: Optional[torch.Tensor] = None,
                                cached_internal_representations: Optional[torch.Tensor] = None,
                                only_internal_representations: bool = False,
                                return_uv_attributes: bool = False) -> GaussianModelsOutput:
@@ -539,13 +536,7 @@ class GaussianHeadLRM(nn.Module):
                 assert x.shape[4] == W_p
 
                 def add_image_features(x: torch.Tensor):
-                    VC = (input_view_mask[0] == 1).sum().item() if input_view_mask is not None else 0
-                    if features.shape[1] == V and VC > 0:
-                        # Only use features of clean input views, if features for all views were provided
-                        features_clean = features[:, -VC:]
-                    else:
-                        features_clean = features
-
+                    features_clean = features
                     VC = features_clean.shape[1]
 
                     if H_p != features_clean.shape[-2] or W_p != features_clean.shape[-1]:
@@ -680,7 +671,6 @@ class GaussianHeadLRM(nn.Module):
                                                              features=batch.features,
                                                              input_cam2worlds=batch.input_cam2worlds,
                                                              input_intrinsics=batch.input_intrinsics,
-                                                             input_view_mask=batch.input_view_mask,
                                                              expression_codes=batch.expression_codes,
                                                              dataset_ids=batch.dataset_ids,
                                                              cached_internal_representations=cached_internal_representations,
@@ -700,10 +690,27 @@ if __name__ == '__main__':
     from flexavatar.data_adapter.in_the_wild_data_adapter import InTheWildDataAdapter
     from flexavatar.config.dataset_config import SampleMetadata
     from visage.matting.modnet import MODNetMatter
+    from tqdm import tqdm
+    from dreifus.trajectory import circle_around_axis
+    import mediapy
 
-    data_adapter = InTheWildDataAdapter("tobi")
-    data_adapter2 = InTheWildDataAdapter("gemini_cvpr_hat_14")
-    sample_metadata = SampleMetadata("tobi", None, 0, None)
+    model_folder = "D:/Projects/PhD-7_Photoreal_3DMM/code_release/models/SLRM-1522"
+    dataset_config = MVDatasetConfig.from_json(load_json(f"{model_folder}/dataset_config.json"))
+    model_config = GaussianHeadLRMConfig.from_json(load_json(f"{model_folder}/model_config.json"))
+    model_config.use_bfloat16 = False
+    device = torch.device('cuda')
+
+    person = "tobi"
+    data_adapter = InTheWildDataAdapter(person, expression_code_config=dataset_config.expression_code_config)
+    data_adapter2 = InTheWildDataAdapter("gemini_cvpr_hat_14", expression_code_config=dataset_config.expression_code_config)
+    data_adapter2 = NeRSembleDataAdapter(240, "EMO-1-shout+laugh", expression_code_config=dataset_config.expression_code_config)
+    timesteps = data_adapter2.list_timesteps()
+    expression_codes = [torch.tensor(data_adapter2.load_expression_code(SampleMetadata(person, None, timestep, None)), device=device)[None, None]
+                        for timestep in timesteps]
+
+    poses = circle_around_axis(len(expression_codes), up=Vec3(0, 1, 0), move=Vec3(0, 0, 1), distance=0.3)
+
+    sample_metadata = SampleMetadata(person, None, 0, None)
     image = data_adapter.load_image(sample_metadata)
 
     canonical_flame_to_world, _ = data_adapter.load_head_pose(sample_metadata)
@@ -713,29 +720,22 @@ if __name__ == '__main__':
         canonical_flame_to_world.invert().numpy() @ cam2world_pose,
         pose_type=PoseType.CAM_2_WORLD)
 
-    device = torch.device('cuda')
     image_torch = torch.tensor(image / 255, dtype=torch.float32).permute(2, 0, 1)[None]
     modnet_matter = MODNetMatter()
     with torch.no_grad():
         alpha_maps = modnet_matter.parse(image_torch).cpu()
     image_torch = image_torch * alpha_maps[:, None] + 1 - alpha_maps[:, None]
 
-    expression_code = torch.zeros((1, 1, 135))
-    expression_code[:, :, :126] = torch.tensor(data_adapter2.load_expression_code(sample_metadata))
+    expression_code = torch.tensor(data_adapter2.load_expression_code(sample_metadata))[None, None]
     batch = GaussianHeadLRMBatch(image_torch[:, None], None, [[flame2world_pose]], [[intrinsics.rescale(1 / 512, inplace=False)]], None, None, None, None, None,
                                  None,
                                  expression_codes=expression_code,
                                  dataset_ids=torch.ones((1, 1), dtype=torch.long))
     batch = batch.to(device)
 
-    model_folder = "D:/Projects/PhD-7_Photoreal_3DMM/code_release/models/SLRM-1522"
-    dataset_config = MVDatasetConfig.from_json(load_json(f"{model_folder}/dataset_config.json"))
-
     preprocessor = GaussianHeadLRMPreprocessor(dataset_config)
     batch = preprocessor.process(batch)
 
-    model_config = GaussianHeadLRMConfig.from_json(load_json(f"{model_folder}/model_config.json"))
-    model_config.use_bfloat16 = False
     model = GaussianHeadLRM(model_config)
 
     checkpoint = torch.load(f"{model_folder}/checkpoints/ckpt-1050k.pt")
@@ -747,12 +747,27 @@ if __name__ == '__main__':
                                               batch.input_cam2worlds,
                                               batch.input_intrinsics,
                                               expression_codes=batch.expression_codes,
-                                              dataset_ids=batch.dataset_ids)
+                                              dataset_ids=batch.dataset_ids,
+                                              only_internal_representations=True)
+        avatar_code = output.internal_representations
 
-        resolution = 512
-        render_cam = pose_to_rendercam(flame2world_pose, intrinsics, resolution, resolution)
-        rendering_output = render_distwar(render_cam, output.gaussian_models[0][0], PipelineParams2(), torch.ones((3,), device=device))
-        rendered_image = rendering_output['render'].permute(1, 2, 0).detach().cpu().numpy()
+        frames = []
+        for ex_code, pose in tqdm(zip(expression_codes, poses)):
+            output = model.create_gaussian_models(batch.input_images,
+                                                  batch.features,
+                                                  batch.input_cam2worlds,
+                                                  batch.input_intrinsics,
+                                                  expression_codes=ex_code,
+                                                  dataset_ids=batch.dataset_ids,
+                                                  cached_internal_representations=avatar_code)
 
+            resolution = 512
+            render_cam = pose_to_rendercam(pose, intrinsics, resolution, resolution)
+            rendering_output = render_distwar(render_cam, output.gaussian_models[0][0], PipelineParams2(), torch.ones((3,), device=device))
+            rendered_image = rendering_output['render'].permute(1, 2, 0).detach().cpu().numpy()
+
+            frames.append(rendered_image)
+
+    mediapy.write_video("D:/Projects/PhD-7_Photoreal_3DMM/code_release/animation.mp4", frames, fps=24)
     save_img(np.clip(rendered_image * 255, 0, 255).astype(np.uint8), "D:/Projects/PhD-7_Photoreal_3DMM/code_release/regression.png")
     print('hi')

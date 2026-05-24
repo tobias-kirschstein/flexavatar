@@ -17,7 +17,10 @@ InputTimestepSampling = Literal['first_frame', 'all', 'random', '10_frames', 'ev
 
 @dataclass
 class MVDatasetConfig(Config):
-    n_participants: int
+    use_dino: bool = True
+    dino_resolution: int = 224  # Input resolution to DINO
+
+    n_participants: int = 1
     percentage_3d_participants: Optional[float] = None
     input_resolution: int = 512
     target_resolution: int = 512
@@ -32,7 +35,6 @@ class MVDatasetConfig(Config):
     target_timestep_sampling: TargetTimestepSampling = 'same_as_input'
     input_timestep_sampling: InputTimestepSampling = 'first_frame'
     back_head_sample_weight: Optional[float] = None
-    use_dino: bool = True
     use_dinov3: bool = False  # remove
     dino_name: str = 'dinov2_vitg14_reg'
     load_precomputed_dino: bool = False
@@ -40,7 +42,7 @@ class MVDatasetConfig(Config):
     expression_code_config: ExpressionCodeConfig = ExpressionCodeConfig()
     load_input_expression_codes: bool = False
     load_render_head_poses: bool = False
-    dino_resolution: int = 224  # Input resolution to DINO
+
     extract_dino_layers: List[int] = field(default_factory=lambda: [-1])
     use_vae: bool = False
     slrm_encoder: Optional[str] = None  # remove
@@ -109,45 +111,6 @@ class MVDatasetConfig(Config):
                               input_view_sampling='frontal',
                               input_timestep_sampling='first_frame')
 
-    def make_ava256_eval(self) -> 'MVDatasetConfig':
-        return better_replace(self,
-                              use_hold_out_ids2=True,
-                              n_target_timesteps=10,
-                              target_view_sampling='eval',
-                              input_view_sampling='frontal',
-                              input_timestep_sampling='first_frame',
-                              target_timestep_sampling='evenly_spaced',
-                              use_random_target_cropping=False,
-                              use_random_input_cropping=False,
-                              use_square_crops=True,
-                              use_random_bg_color=False,
-                              use_image_augmentations=False,
-                              apply_color_correction=True,
-                              prob_nvs_task=0,
-                              percentage_3d_participants=None)
-
-    def make_ava256_static_eval(self) -> 'MVDatasetConfig':
-        return better_replace(self,
-                              use_hold_out_ids2=True,
-                              n_target_timesteps=1,
-                              target_view_sampling='eval',
-                              input_view_sampling='frontal',
-                              input_timestep_sampling='first_frame',
-                              target_timestep_sampling='same_as_input',
-                              use_random_target_cropping=False,
-                              use_random_input_cropping=False,
-                              use_square_crops=True,
-                              use_random_bg_color=False,
-                              use_image_augmentations=False,
-                              apply_color_correction=True,
-                              prob_nvs_task=0,
-                              percentage_3d_participants=None)
-
-    def make_ava256_static_back_eval(self):
-        dataset_config = self.make_ava256_static_eval()
-        return better_replace(dataset_config,
-                              target_view_sampling='static')
-
     def make_in_the_wild_eval(self) -> 'MVDatasetConfig':
         return better_replace(self,
                               n_target_timesteps=1,
@@ -164,96 +127,6 @@ class MVDatasetConfig(Config):
                               prob_nvs_task=0,
                               percentage_3d_participants=None)
 
-    def make_ava256_avat3r_eval(self):
-        dataset_config = self.make_ava256_eval()
-        dataset_config.n_input_views = 4
-        dataset_config.n_target_views = 1
-        dataset_config.n_target_timesteps = 1
-        dataset_config.target_timestep_sampling = 'same_as_input'
-        dataset_config.target_view_sampling = 'same_as_input'
-        dataset_config.use_custom_input_cropping = True
-        dataset_config.use_custom_target_cropping = True
-        dataset_config.load_input_expression_codes = True
-        dataset_config.bg_color = (0, 0, 0)
-        dataset_config.exclude_avat3r_participants = False
-        return dataset_config
-
-    def make_celebvtext_eval(self) -> 'MVDatasetConfig':
-        return better_replace(self,
-                              use_hold_out_ids2=True,
-                              n_participants=10,
-                              n_target_views=1,
-                              n_target_timesteps=10,
-                              target_view_sampling='sequential',
-                              input_view_sampling='frontal',
-                              input_timestep_sampling='first_frame',
-                              target_timestep_sampling='evenly_spaced',
-                              use_random_target_cropping=False,
-                              use_random_input_cropping=False,
-                              use_random_bg_color=False,
-                              use_image_augmentations=False,
-                              prob_nvs_task=0,
-                              percentage_3d_participants=None)
-
-    def make_vfhq_test_eval(self, use_cross_reenactment: bool = False) -> 'MVDatasetConfig':
-        return better_replace(self,
-                              use_hold_out_ids=False,
-                              use_hold_out_ids2=False,
-                              n_participants=50,
-                              n_target_views=1,
-                              n_target_timesteps=10,
-                              target_view_sampling='sequential',
-                              input_view_sampling='frontal',
-                              input_timestep_sampling='first_frame',
-                              target_timestep_sampling='evenly_spaced',
-                              use_random_target_cropping=False,
-                              use_random_input_cropping=False,
-                              use_random_bg_color=False,
-                              use_image_augmentations=False,
-                              use_cross_reenactment=use_cross_reenactment,
-                              prob_nvs_task=0,
-                              percentage_3d_participants=None)
-
-    def make_nersemble_eval(self) -> 'MVDatasetConfig':
-        return better_replace(self,
-                              use_hold_out_ids2=True,
-                              n_participants=-1,
-                              n_target_views=1,
-                              n_target_timesteps=10,
-                              target_view_sampling='eval',
-                              input_view_sampling='frontal',
-                              input_timestep_sampling='first_frame',
-                              target_timestep_sampling='evenly_spaced',
-                              use_random_target_cropping=False,
-                              use_random_input_cropping=False,
-                              use_square_crops=True,
-
-                              use_random_bg_color=False,
-                              use_image_augmentations=False,
-                              apply_color_correction=True,
-                              prob_nvs_task=0,
-                              percentage_3d_participants=None)
-
-    def make_nersemble_benchmark_eval(self, n_inputs: int = 1, n_input_sequences: int = 1) -> 'MVDatasetConfig':
-        return better_replace(self,
-                              use_hold_out_ids2=False,
-                              n_participants=-1,
-                              n_input_views=n_inputs,
-                              n_input_sequences=n_input_sequences,
-                              n_target_views=1,
-                              n_target_timesteps=1,
-                              target_view_sampling='eval',
-                              input_view_sampling='frontal',
-                              input_timestep_sampling='evenly_spaced',
-                              target_timestep_sampling='evenly_spaced',
-                              use_random_target_cropping=False,
-                              use_random_input_cropping=False,
-                              load_input_expression_codes=True,
-
-                              use_random_bg_color=False,
-                              use_image_augmentations=False,
-                              prob_nvs_task=0,
-                              percentage_3d_participants=None)
 
 
 DatasetType = Literal[

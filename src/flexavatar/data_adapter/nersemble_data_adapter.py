@@ -3,12 +3,10 @@ from typing import List, Union
 from flexavatar.config.dataset_config import SampleMetadata
 from flexavatar.config.expression_config import ExpressionCodeConfig
 from flexavatar.data_adapter.pixel3dmm_data_adapter import Pixel3DMMDataAdapter
+from flexavatar.env import FLEXAVATAR_PIXEL3DMM_PROCESSING_PATH
 
-HARDCODED_PATH = "D:/Projects/PhD-7_Photoreal_3DMM/code_release/drivers/nersemble"
 
 class NeRSembleDataAdapter(Pixel3DMMDataAdapter):
-
-
     def __init__(self, participant_id: int, sequence_name: str, expression_code_config: ExpressionCodeConfig = ExpressionCodeConfig()):
         super().__init__(None, expression_code_config)
         self._participant_id = participant_id
@@ -22,7 +20,7 @@ class NeRSembleDataAdapter(Pixel3DMMDataAdapter):
 
     @classmethod
     def _get_tracking_base_path(cls) -> str:
-        return HARDCODED_PATH
+        return f"{FLEXAVATAR_PIXEL3DMM_PROCESSING_PATH}/tracking/nersemble"
 
     @classmethod
     def _get_data_base_path(cls) -> str:

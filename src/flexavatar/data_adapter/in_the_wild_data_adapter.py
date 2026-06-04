@@ -12,10 +12,9 @@ from elias.util.io import resize_img
 
 from flexavatar.config.dataset_config import SampleMetadata
 from flexavatar.data_adapter.pixel3dmm_data_adapter import Pixel3DMMDataAdapter
+from flexavatar.env import FLEXAVATAR_INPUTS_PATH, FLEXAVATAR_PIXEL3DMM_PROCESSING_PATH
 
 ITW_ENLARGE_FACTOR = 0.1
-PHO3DMM_ANALYSES_PATH = "D:/Projects/PhD-7_Photoreal_3DMM/analyses"
-PHO3DMM_PIXEL3DMM_PROCESSING_PATH = "//wsl.localhost/Ubuntu/mnt/rohan/cluster/moria/tkirschstein/photoreal_3dmm/pixel3dmm_tracking"
 
 class InTheWildDataAdapter(Pixel3DMMDataAdapter):
     def load_image(self, sample_metadata: SampleMetadata) -> np.ndarray:
@@ -101,24 +100,24 @@ class InTheWildDataAdapter(Pixel3DMMDataAdapter):
         return image
 
     def get_image_path(self, image_name: str) -> str:
-        image_path = f"{PHO3DMM_ANALYSES_PATH}/in_the_wild_inputs/{image_name}.png"
+        image_path = f"{FLEXAVATAR_INPUTS_PATH}/itw/{image_name}.png"
         if not Path(image_path).exists():
-            image_path = f"{PHO3DMM_ANALYSES_PATH}/in_the_wild_inputs/{image_name}.jpg"
+            image_path = f"{FLEXAVATAR_INPUTS_PATH}/itw/{image_name}.jpg"
 
         return image_path
 
     def _get_crop_params_path(self) -> str:
-        return f"{PHO3DMM_PIXEL3DMM_PROCESSING_PATH}/processing/itw/{self._video_key}/tracking/crop_ymin_ymax_xmin_xmax.npy"
+        return f"{FLEXAVATAR_PIXEL3DMM_PROCESSING_PATH}/processing/itw/{self._video_key}/tracking/crop_ymin_ymax_xmin_xmax.npy"
 
     def _get_tracking_folder(self) -> str:
-        return f"tracking/itw/{self._video_key}/tracking_nV1_noPho_uv2000.0_n1000.0"
+        return f"{self._video_key}/tracking_nV1_noPho_uv2000.0_n1000.0"
 
     def _get_data_folder(self) -> str:
         pass
 
     @classmethod
     def _get_tracking_base_path(cls) -> str:
-        return PHO3DMM_PIXEL3DMM_PROCESSING_PATH
+        return f"{FLEXAVATAR_PIXEL3DMM_PROCESSING_PATH}/tracking/itw"
 
     @classmethod
     def _get_data_base_path(cls) -> str:

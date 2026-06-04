@@ -27,6 +27,7 @@ dependencies:
       - dreifus
       - elias
       - visage
+      - environs
       - torchvision
       - einops
       - git+https://github.com/tobias-kirschstein/stylegan-generators.git

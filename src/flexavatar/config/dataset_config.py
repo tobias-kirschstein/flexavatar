@@ -198,7 +198,7 @@ class MVDatasetSample(MVDatasetInferenceSample):
 
 
 @dataclass
-class GaussianHeadLRMBatch:
+class FlexAvatarBatch:
     input_images: torch.Tensor  # [B, VI, C, H, W]
     input_sample_metadatas: List[List[SampleMetadata]]  # [B, VI]
     input_cam2worlds: List[List[Pose]]  # [B, VI]
@@ -220,7 +220,7 @@ class GaussianHeadLRMBatch:
     render_head_poses: Optional[List[List[Pose]]] = None  # [B, VT]
     dataset_ids: Optional[torch.Tensor] = None  # [B]
 
-    def __getitem__(self, item) -> 'GaussianHeadLRMBatch':
+    def __getitem__(self, item) -> 'FlexAvatarBatch':
         selected_values = dict()
         for field in fields(self):
             value = getattr(self, field.name)

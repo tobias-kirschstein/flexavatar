@@ -6,7 +6,6 @@ import numpy as np
 import torch
 from dreifus.matrix import Pose, Intrinsics
 from einops import rearrange
-from elias.config import Config
 from gaussian_splatting.arguments import PipelineParams2
 from gaussian_splatting.gaussian_renderer import render_distwar, render_gsplat_batched
 from gaussian_splatting.scene import GaussianModel
@@ -17,8 +16,8 @@ from torch.nn.modules.module import T
 from torchvision.ops import MLP
 from trimesh import load_mesh
 
-from flexavatar.config.dataset_config import GaussianHeadLRMBatch
-from flexavatar.config.flexavatar_config import HeadTransformerConfig, HeadTransformerType, CrossAttentionType
+from flexavatar.config.dataset_config import FlexAvatarBatch
+from flexavatar.config.flexavatar_config import HeadTransformerConfig, HeadTransformerType, CrossAttentionType, GaussianDecoderConfig, FlexAvatarModelConfig
 from flexavatar.env import ASSETS_PATH
 from flexavatar.model.lam_gs_layer import GSLayer
 from flexavatar.model.lam_point_embedder import PointEmbed
@@ -27,50 +26,6 @@ from flexavatar.model.nanogpt import GPTConfig, GPT
 from flexavatar.model.stylegan_upsampler import StyleGANUpsamplerConfig, StyleGANPixelShuffleUpsampler
 from flexavatar.util.plucker import plucker_embedder
 from flexavatar.util.uv import gen_tritex
-
-
-@dataclass
-class GaussianDecoderConfig(Config):
-    n_gaussians_per_token: int
-    res_head_tokens: int
-    d_hidden: int
-    n_mlp_layers: int
-    scale_offset: float
-    scale_max: float
-    scale_min: float = -40
-    position_range: float = 0.4
-    res_uv_texture: int = 256
-    res_image_tokens: Optional[int] = None
-    upscale_uv_texture: Optional[int] = None
-    head_transformer_type: HeadTransformerType = HeadTransformerType.MESH_TOKENS
-    use_stylegan_pixelshuffle_upsampler: bool = False
-    use_norm_before_mlp: bool = True
-    initialize_with_image: bool = False
-    n_channels_color: int = 3
-    fix_mlp_order: bool = False
-    use_head_tokens: bool = True
-    oversampling_factor: int = 1  # By how much generated (uv)-textures should be oversampled to spawn Gaussians
-    use_lam_gs_decoder: bool = False
-    sh_degree: int = 0
-    head_template: str = 'gghead_template'
-    d_expression_codes: Optional[int] = None
-
-
-@dataclass
-class GaussianHeadLRMConfig(Config):
-    head_transformer: HeadTransformerConfig
-    gaussian_decoder: GaussianDecoderConfig
-    patch_size: int
-    in_channels: int
-    n_layers_encoder: int
-    n_input_views: int = 1
-    use_feature_projection: bool = False
-    feature_dim: int = 1536
-    use_bfloat16: bool = False
-    use_plucker: bool = False
-
-    compile: bool = False
-    use_gsplat: bool = False
 
 
 @dataclass
@@ -87,7 +42,7 @@ class GaussianModelsOutput:
 
 
 @dataclass
-class GaussianHeadLRMOutput:
+class FlexAvatarOutput:
     gaussian_models_output: GaussianModelsOutput
     rendering_output: RenderingOutput
 
@@ -447,9 +402,9 @@ class GaussianDecoder(nn.Module):
         return gaussian_models, gaussian_predictions
 
 
-class GaussianHeadLRM(nn.Module):
+class FlexAvatarModel(nn.Module):
 
-    def __init__(self, config: GaussianHeadLRMConfig):
+    def __init__(self, config: FlexAvatarModelConfig):
         super().__init__()
         conv_in_channels = config.in_channels
         if config.use_plucker:
@@ -599,7 +554,7 @@ class GaussianHeadLRM(nn.Module):
 
         return gaussian_models_output
 
-    def render(self, gaussian_models: List[List[GaussianModel]], batch: GaussianHeadLRMBatch, use_gsplat: Optional[bool] = None) -> RenderingOutput:
+    def render(self, gaussian_models: List[List[GaussianModel]], batch: FlexAvatarBatch, use_gsplat: Optional[bool] = None) -> RenderingOutput:
         if isinstance(batch.render_resolution[0], int):
             img_w = batch.render_resolution[0]
             img_h = batch.render_resolution[0]
@@ -657,11 +612,11 @@ class GaussianHeadLRM(nn.Module):
         return output
 
     def forward(self,
-                batch: GaussianHeadLRMBatch,
+                batch: FlexAvatarBatch,
                 cached_internal_representations: Optional[torch.Tensor] = None,
                 only_internal_representations: bool = False,
                 only_gaussian_models: bool = False,
-                return_uv_attributes: bool = False) -> GaussianHeadLRMOutput:
+                return_uv_attributes: bool = False) -> FlexAvatarOutput:
 
         gaussian_models_output = self.create_gaussian_models(batch.input_images,
                                                              features=batch.features,
@@ -676,6 +631,6 @@ class GaussianHeadLRM(nn.Module):
         if not only_internal_representations and not only_gaussian_models:
             rendering_output = self.render(gaussian_models_output.gaussian_models, batch)
 
-        output = GaussianHeadLRMOutput(gaussian_models_output, rendering_output)
+        output = FlexAvatarOutput(gaussian_models_output, rendering_output)
 
         return output

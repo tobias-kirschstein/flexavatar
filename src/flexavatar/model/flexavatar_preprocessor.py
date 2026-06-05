@@ -4,12 +4,12 @@ from typing import List, Callable
 import torch
 import torchvision
 
-from flexavatar.config.dataset_config import MVDatasetConfig, GaussianHeadLRMBatch, SampleMetadata
+from flexavatar.config.dataset_config import MVDatasetConfig, FlexAvatarBatch, SampleMetadata
 from flexavatar.model.dinov2 import DinoV2
 from flexavatar.util.lru_cache import DeviceLRUCache
 
 
-class GaussianHeadLRMPreprocessor:
+class FlexAvatarPreprocessor:
 
     def __init__(self,
                  dataset_config: MVDatasetConfig,
@@ -37,7 +37,7 @@ class GaussianHeadLRMPreprocessor:
                 self._dino_cache = DeviceLRUCache(device, torch.device('cpu'), cache_dtype=cache_dtype, max_size=cache_size)
 
 
-    def process(self, batch: GaussianHeadLRMBatch, disable_cache: bool = False, enable_grads: bool = False):
+    def process(self, batch: FlexAvatarBatch, disable_cache: bool = False, enable_grads: bool = False):
         use_caching = self._use_caching and not disable_cache
         device = batch.input_images.device
         if self._dataset_config.use_dino and not self._dataset_config.load_precomputed_dino:

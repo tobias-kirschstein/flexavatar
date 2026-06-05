@@ -12,4 +12,4 @@ if env_file_path.exists():
 with env.prefixed("FLEXAVATAR_"):
     FLEXAVATAR_INPUTS_PATH = env("INPUTS_PATH", f"{REPO_ROOT}/data/inputs")
     FLEXAVATAR_PIXEL3DMM_PROCESSING_PATH = env("PIXEL3DMM_PROCESSING_PATH", f"{REPO_ROOT}/data/pixel3dmm_processing")
-    FLEXAVATAR_MODELS_PATH = env("MODELS_PATH", f"{REPO_ROOT}/data/models")
+    FLEXAVATAR_MODELS_PATH = env("MODELS_PATH", f"{REPO_ROOT}/models")

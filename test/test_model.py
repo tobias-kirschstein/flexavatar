@@ -18,18 +18,21 @@ from flexavatar.config.dataset_config import SampleMetadata, FlexAvatarBatch
 from flexavatar.data_adapter.in_the_wild_data_adapter import InTheWildDataAdapter
 from flexavatar.data_adapter.nersemble_data_adapter import NeRSembleDataAdapter
 from flexavatar.model.flexavatar_preprocessor import FlexAvatarPreprocessor
+from flexavatar.model.inversion import FittingManager, FittingConfig
 from flexavatar.model_manager.flexavatar_model_manager import FlexAvatarModelManager
 
 
 class ModelTest(TestCase):
     def test_model(self):
+        source_person = "tobi"
+        run_fitting = True
         model_name = 'FLEX-1'
         checkpoint = -1
-        source_person = "tobi"
+        device = torch.device('cuda')
+        output_folder = "D:/Projects/PhD-7_Photoreal_3DMM/code_release"
+
         model_manager = FlexAvatarModelManager(model_name)
         dataset_config = model_manager.load_dataset_config()
-
-        device = torch.device('cuda')
 
         #----------------------------------------------------------
         # Prepare model input
@@ -58,11 +61,18 @@ class ModelTest(TestCase):
         input_intrinsics = input_intrinsics.rescale(1 / 512)  # Model takes input intrinsics in canonical form
 
         # 4. Load expression code of input image (needed for fitting stage)
-        expression_code = torch.tensor(data_adapter_source.load_expression_code(sample_metadata))[None, None]
-        batch = FlexAvatarBatch(image_torch[:, None], None, [[input_flame2world_pose]], [[input_intrinsics]], None, None, None, None,
+        input_recordexpression_code = torch.tensor(data_adapter_source.load_expression_code(sample_metadata))[None, None]
+        batch = FlexAvatarBatch(image_torch[:, None],
+                                None,
+                                [[input_flame2world_pose]],
+                                [[input_intrinsics]],
                                 None,
                                 None,
-                                expression_codes=expression_code,
+                                None,
+                                None,
+                                None,
+                                None,
+                                input_expression_codes=input_recordexpression_code,
                                 dataset_ids=torch.ones((1, 1), dtype=torch.long))
         batch = batch.to(device)
 
@@ -92,14 +102,23 @@ class ModelTest(TestCase):
         model.to(device)
 
         #----------------------------------------------------------
+        # Run fitting
+        #----------------------------------------------------------
+        if run_fitting:
+            fitting_config = FittingConfig()
+            fitting_manager = FittingManager(model, fitting_config)
+            avatar_code, fitting_history, _ = fitting_manager.run_inversion(batch)
+            mediapy.write_video(f"{output_folder}/fitting_history_{source_person}.mp4", fitting_history)
+        else:
+            avatar_code = None
+
+        #----------------------------------------------------------
         # Create avatar and render images
         #----------------------------------------------------------
 
         with torch.no_grad():
-            avatar_code = None
-
             frames = []
-            for ex_code, pose in tqdm(zip(expression_codes, poses)):
+            for ex_code, pose in tqdm(zip(expression_codes, poses), desc="Animating and Rendering"):
                 output = model.create_gaussian_models(batch.input_images,
                                                       batch.features,
                                                       batch.input_cam2worlds,

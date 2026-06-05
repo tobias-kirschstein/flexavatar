@@ -16,7 +16,7 @@ from tqdm import tqdm
 
 from flexavatar.config.dataset_config import FlexAvatarBatch
 from flexavatar.model.flexavatar_model import FlexAvatarModel, FlexAvatarOutput
-from flexavatar.util.dino_loss import DinoV2Loss
+from dino_loss import DinoV2Loss
 
 
 @dataclass

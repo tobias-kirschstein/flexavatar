@@ -136,6 +136,6 @@ class ModelTest(TestCase):
 
                 frames.append(rendered_image)
 
-        mediapy.write_video("D:/Projects/PhD-7_Photoreal_3DMM/code_release/animation.mp4", frames, fps=24)
-        save_img(np.clip(rendered_image * 255, 0, 255).astype(np.uint8), "D:/Projects/PhD-7_Photoreal_3DMM/code_release/regression.png")
+        mediapy.write_video(f"{output_folder}/animation.mp4", frames, fps=24)
+        save_img(np.clip(rendered_image * 255, 0, 255).astype(np.uint8), f"{output_folder}/regression.png")
         print('hi')

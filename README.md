@@ -1,6 +1,12 @@
 # Official FlexAvatar Implementation [CVPR '26]
 From the paper *"FlexAvatar: Learning Complete 3D Head Avatars with Partial Supervision"*
 
+
+[Paper](https://tobias-kirschstein.github.io/flexavatar/static/FlexAvatar_paper.pdf) | [Video](https://youtu.be/g8wxqYBlRGY) | [Project Page](https://tobias-kirschstein.github.io/flexavatar/)
+![](static/flexavatar_teaser.jpg)
+[Tobias Kirschstein](https://tobias-kirschstein.github.io/), [Simon Giebenhain](https://simongiebenhain.github.io/), [Matthias Nießner](https://www.niessnerlab.org/)
+**CVPR 2026**
+
 ## 1. Setup
 1. Create conda environment `flexavatar` with newest PyTorch and CUDA 11.8:
     ```shell
@@ -22,9 +28,23 @@ For these images, 3D head avatars can be created and rendered via:
 python scripts/render_example.py
 ```
 The resulting renderings will be stored in the `renderings` folder in the repository.
+![](static/rendering_marble_sculpture.gif)
 
 ## 2.2. Create Avatars for Custom Inputs
 *Coming soon...*
 
 ## 2.3. Drive Avatars with Custom Videos
 *Coming soon...*
+
+<hr>
+
+If you find this repository useful please consider citing
+```bibtex
+@inproceedings{kirschstein2026flexavatar,
+  title={Flexavatar: Learning complete 3d head avatars with partial supervision},
+  author={Kirschstein, Tobias and Giebenhain, Simon and Nie{\ss}ner, Matthias},
+  booktitle={Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition},
+  pages={18193--18203},
+  year={2026}
+}
+```

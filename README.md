@@ -1,10 +1,10 @@
-# Official FlexAvatar Implementation [CVPR '26]
+# Official Implementation of FlexAvatar [CVPR '26]
 From the paper *"FlexAvatar: Learning Complete 3D Head Avatars with Partial Supervision"*
 
 
 [Paper](https://tobias-kirschstein.github.io/flexavatar/static/FlexAvatar_paper.pdf) | [Video](https://youtu.be/g8wxqYBlRGY) | [Project Page](https://tobias-kirschstein.github.io/flexavatar/)
 ![](static/flexavatar_teaser.jpg)
-[Tobias Kirschstein](https://tobias-kirschstein.github.io/), [Simon Giebenhain](https://simongiebenhain.github.io/), [Matthias Nießner](https://www.niessnerlab.org/)
+[Tobias Kirschstein](https://tobias-kirschstein.github.io/), [Simon Giebenhain](https://simongiebenhain.github.io/), [Matthias Nießner](https://www.niessnerlab.org/)  
 **CVPR 2026**
 
 ## 1. Setup

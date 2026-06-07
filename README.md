@@ -37,6 +37,8 @@ The resulting renderings will be stored in the `renderings` folder in the reposi
 ## 2.3. Drive Avatars with Custom Videos
 *Coming soon...*
 
+## 2.4. Interactive Viewer
+
 <hr>
 
 If you find this repository useful please consider citing

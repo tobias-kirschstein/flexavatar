@@ -22,8 +22,24 @@ from flexavatar.model_manager.flexavatar_model_manager import FlexAvatarModelMan
 
 
 def main(source_person: str = 'marble_sculpture',
+         driving_sequence: str = 'EMO-1-shout+laugh',
          run_fitting: bool = True,
          render_360: bool = False):
+    """
+
+    Parameters
+    ----------
+    source_person:
+        For which input image an avatar should be created.
+        Available avatars are in data/inputs/itw/{$source_person}.jpg
+    driving_sequence:
+        driving video used to animate the avatar.
+        Available driving sequences are in data/pixel3dmm_processing/tracking/nersemble/240
+    run_fitting:
+        Whether to run the fitting stage of FlexAvatar.
+    render_360:
+        Whether to render a 360° circular trajectory or a frontal circular trajectory.
+    """
 
     model_name = 'FLEX-1'
     checkpoint = 900
@@ -84,7 +100,7 @@ def main(source_person: str = 'marble_sculpture',
     # ----------------------------------------------------------
 
     # 1. Load expression codes from driving sequence
-    data_adapter_driver = NeRSembleDataAdapter(240, "EMO-1-shout+laugh", expression_code_config=dataset_config.expression_code_config)
+    data_adapter_driver = NeRSembleDataAdapter(240, driving_sequence, expression_code_config=dataset_config.expression_code_config)
     timesteps = data_adapter_driver.list_timesteps()
     expression_codes = [
         torch.tensor(data_adapter_driver.load_expression_code(SampleMetadata(source_person, None, timestep, None)), device=device)[None, None]
@@ -143,7 +159,7 @@ def main(source_person: str = 'marble_sculpture',
 
             frames.append(rendered_image)
 
-    output_path = f"{output_folder}/rendering_{source_person}.mp4"
+    output_path = f"{output_folder}/rendering_p{source_person}_dr{driving_sequence}.mp4"
     ensure_directory_exists_for_file(output_path)
     mediapy.write_video(output_path, frames, fps=24)
     print("DONE")

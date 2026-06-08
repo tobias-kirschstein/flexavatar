@@ -50,13 +50,13 @@ The resulting renderings will be stored in the `renderings` folder in the reposi
 
 Ensure you have run the full setup instructions following [section 1.2](#12-full-setup).
 
- 1. Put any portrait image (.jpg/.png) into `data/inputs/itw`. For example `${source_person}.jpg`
- 2. Run Pixel3DMM tracking via
+1. Put any portrait image (.jpg/.png) into `data/inputs/itw`. For example `${source_person}.jpg`
+2. Run Pixel3DMM tracking via
    ```shell
    python scripts/track_pixel3dmm_itw.py ${source_person} 
    ```
    The resulting tracking output will be written into `data/pixel3dmm_processing/tracking/itw/${source_person}`.
- 3. Now you can create and render your avatar as described in [section 2.1](#21-render--animate-example-avatars), e.g. via 
+3. Now you can create and render your avatar as described in [section 2.1](#21-render--animate-example-avatars), e.g. via 
    ```shell
    python scripts/render_example.py --source_person ${source_person}
    ```

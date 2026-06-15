@@ -50,6 +50,7 @@ The script supports these parameters among others:
  * `--help`: Display more options
 
 The resulting renderings will be stored in the `renderings` folder in the repository.
+Additionally, the corresponding avatar code will be stored in `data/avatar_codes/avatar_code_${source_person}.npy`. The avatar code can will be loaded automatically by future instantiations of the rendering script to skip the avatar creation and fitting stages. It can also be loaded by the GUI (see [section 2.4](#24-interactive-viewer))
 ![](static/rendering_marble_sculpture.gif)
 
 ## 2.2. Create Avatars for Custom Inputs
@@ -81,6 +82,21 @@ Ensure you have run the full setup instructions following [section 1.2](#12-full
    ```
 
 ## 2.4. Interactive Viewer
+
+![](static/flexavatar_gui_demo.gif)
+
+The interactive GUI can be started via
+
+```shell
+python scripts/run_gui.py
+```
+
+It supports:
+ - Free 3D exploration
+ - Loading avatar codes (e.g., those created by `render_example.py` in [section 2.1](#21-render--animate-example-avatars))
+ - manually animating individual FLAME expression code dimensions via sliders
+
+Note, you need to run `render_example.py` once before such that the GUI has an avatar code to load.
 
 <hr>
 

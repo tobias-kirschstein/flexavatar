@@ -200,15 +200,7 @@ class LocalViewer(Mini3DViewer):
         self._expression_codes = [torch.tensor(expression_code, dtype=torch.float32, device=device) for expression_code in expression_codes]
         self._last_expression_code = self._expression_codes[0]
 
-        neutral = torch.zeros(135, dtype=torch.float32, device=device)
-        identity_6d = torch.tensor([1, 0, 0, 0, 1, 0], dtype=torch.float32, device=device)
-        neutral[100:106] = identity_6d   # left eye
-        neutral[106:112] = identity_6d   # right eye
-        neutral[114:120] = identity_6d   # neck
-        neutral[120:126] = identity_6d   # jaw
-        neutral[126:132] = identity_6d   # head pose rotation
-        # neutral[132:135] stays zero    # head pose translation
-        self._manual_expression_code = neutral
+        self._manual_expression_code = self._make_neutral_expression_code(device)
 
         print("Producing sample avatar...")
         if self._avatar_code_manager.has_avatar_code(custom_avatar_name):
@@ -228,6 +220,18 @@ class LocalViewer(Mini3DViewer):
 
         self._avatar_code = output.internal_representations
         self.gaussians = output.gaussian_models[0][0]
+
+    def _make_neutral_expression_code(self, device=None):
+        if device is None:
+            device = self._manual_expression_code.device
+        neutral = torch.zeros(135, dtype=torch.float32, device=device)
+        identity_6d = torch.tensor([1, 0, 0, 0, 1, 0], dtype=torch.float32, device=device)
+        neutral[100:106] = identity_6d   # left eye
+        neutral[106:112] = identity_6d   # right eye
+        neutral[114:120] = identity_6d   # neck
+        neutral[120:126] = identity_6d   # jaw
+        neutral[126:132] = identity_6d   # head pose rotation
+        return neutral
 
     def start_animation_thread(self):
         animation_thread = Thread(target=self._animate_avatar)
@@ -404,7 +408,7 @@ class LocalViewer(Mini3DViewer):
         super().define_gui()
 
         # window: rendering options ==================================================================================================
-        with dpg.window(label="Render", tag="_render_window", autosize=True):
+        with dpg.window(label="Render", tag="_render_window", autosize=True, max_size=(480, 9999)):
 
             with dpg.group(horizontal=True):
                 dpg.add_text("FPS:", show=not self.cfg.demo_mode)
@@ -440,6 +444,19 @@ class LocalViewer(Mini3DViewer):
 
                 dpg.add_checkbox(label="Manual Animation", default_value=self._is_manual_animation, callback=callback_manual_animation, tag="_checkbox_manual_animation")
 
+                def callback_reset_manual_expression(sender, app_data):
+                    self._manual_expression_code = self._make_neutral_expression_code()
+                    for _dim in range(10):
+                        dpg.set_value(f"_slider_expr_dim_{_dim}", 0.0)
+                    dpg.set_value("_slider_eyelid_112", 0.0)
+                    for _ax in ['X', 'Y', 'Z']:
+                        dpg.set_value(f"_slider_eye_100_{_ax}", 0.0)
+                        dpg.set_value(f"_slider_neck_{_ax}", 0.0)
+                        dpg.set_value(f"_slider_jaw_{_ax}", 0.0)
+                        # dpg.set_value(f"_slider_head_trans_{_ax}", 0.0)
+
+                dpg.add_button(label="Reset", callback=callback_reset_manual_expression, tag="_button_reset_manual_expression")
+
             with dpg.group(tag="_group_expression_sliders", show=self._is_manual_animation):
                 dpg.add_text("Expression Code Dimensions")
 
@@ -454,104 +471,101 @@ class LocalViewer(Mini3DViewer):
                                          callback=make_expr_callback(_dim))
 
                 dpg.add_separator()
-                dpg.add_text("Left Eye Rotation (Euler degrees)")
 
-                def make_eye_callback(offset):
-                    # offset: 100 for left eye, 106 for right eye
-                    axes = ['X', 'Y', 'Z']
-                    def callback(sender, app_data):
-                        euler_angles = [dpg.get_value(f"_slider_eye_{offset}_{ax}") for ax in axes]
-                        rot_matrix = torch.tensor(
-                            R.from_euler('xyz', euler_angles, degrees=True).as_matrix(),
-                            dtype=torch.float32, device=self._last_expression_code.device
-                        )
-                        rot6d = matrix_to_rotation_6d(rot_matrix)
-                        self._manual_expression_code[offset:offset + 6] = rot6d
-                    return callback
+                def callback_eyelids(sender, app_data):
+                    self._manual_expression_code[112] = app_data
+                    self._manual_expression_code[113] = app_data
 
-                for _ax in ['X', 'Y', 'Z']:
-                    dpg.add_slider_float(label=f"Left Eye {_ax}", tag=f"_slider_eye_100_{_ax}", width=200,
-                                         min_value=-45.0, max_value=45.0, default_value=0.0,
-                                         callback=make_eye_callback(100))
+                dpg.add_slider_float(label="Eyelids", tag="_slider_eyelid_112", width=180,
+                                     min_value=-3.0, max_value=3.0, default_value=0.0,
+                                     callback=callback_eyelids)
 
                 dpg.add_separator()
-                dpg.add_text("Right Eye Rotation (Euler degrees)")
 
-                for _ax in ['X', 'Y', 'Z']:
-                    dpg.add_slider_float(label=f"Right Eye {_ax}", tag=f"_slider_eye_106_{_ax}", width=200,
-                                         min_value=-45.0, max_value=45.0, default_value=0.0,
-                                         callback=make_eye_callback(106))
+                def callback_eyes(sender, app_data):
+                    euler_angles = [dpg.get_value(f"_slider_eye_100_{ax}") for ax in ['X', 'Y', 'Z']]
+                    rot_matrix = torch.tensor(
+                        R.from_euler('xyz', euler_angles, degrees=True).as_matrix(),
+                        dtype=torch.float32, device=self._manual_expression_code.device
+                    )
+                    rot6d = matrix_to_rotation_6d(rot_matrix)
+                    self._manual_expression_code[100:106] = rot6d
+                    self._manual_expression_code[106:112] = rot6d
 
-                dpg.add_separator()
-                dpg.add_text("Jaw Pose (Euler degrees)")
+                def callback_neck(sender, app_data):
+                    euler_angles = [dpg.get_value(f"_slider_neck_{ax}") for ax in ['X', 'Y', 'Z']]
+                    rot_matrix = torch.tensor(
+                        R.from_euler('xyz', euler_angles, degrees=True).as_matrix(),
+                        dtype=torch.float32, device=self._manual_expression_code.device
+                    )
+                    rot6d = matrix_to_rotation_6d(rot_matrix)
+                    self._manual_expression_code[114:120] = rot6d
+                    self._manual_expression_code[126:132] = rot6d
 
                 def callback_jaw(sender, app_data):
                     euler_angles = [dpg.get_value(f"_slider_jaw_{ax}") for ax in ['X', 'Y', 'Z']]
                     rot_matrix = torch.tensor(
                         R.from_euler('xyz', euler_angles, degrees=True).as_matrix(),
-                        dtype=torch.float32, device=self._last_expression_code.device
+                        dtype=torch.float32, device=self._manual_expression_code.device
                     )
-                    rot6d = matrix_to_rotation_6d(rot_matrix)
-                    self._manual_expression_code[120:126] = rot6d
+                    self._manual_expression_code[120:126] = matrix_to_rotation_6d(rot_matrix)
 
-                for _ax in ['X', 'Y', 'Z']:
-                    dpg.add_slider_float(label=f"Jaw {_ax}", tag=f"_slider_jaw_{_ax}", width=200,
-                                         min_value=-45.0, max_value=45.0, default_value=0.0,
-                                         callback=callback_jaw)
-
-                dpg.add_separator()
-                dpg.add_text("Head Pose Rotation (Euler degrees)")
-
-                def callback_head_rot(sender, app_data):
-                    euler_angles = [dpg.get_value(f"_slider_head_rot_{ax}") for ax in ['X', 'Y', 'Z']]
-                    rot_matrix = torch.tensor(
-                        R.from_euler('xyz', euler_angles, degrees=True).as_matrix(),
-                        dtype=torch.float32, device=self._last_expression_code.device
-                    )
-                    rot6d = matrix_to_rotation_6d(rot_matrix)
-                    self._manual_expression_code[126:132] = rot6d
-
-                for _ax in ['X', 'Y', 'Z']:
-                    dpg.add_slider_float(label=f"Head Rot {_ax}", tag=f"_slider_head_rot_{_ax}", width=200,
-                                         min_value=-45.0, max_value=45.0, default_value=0.0,
-                                         callback=callback_head_rot)
-
-                dpg.add_text("Head Pose Translation")
-
-                def make_head_trans_callback(dim, idx):
+                def make_head_trans_callback(dim):
                     def callback(sender, app_data):
                         self._manual_expression_code[dim] = app_data
                     return callback
 
-                for _i, _ax in enumerate(['X', 'Y', 'Z']):
-                    dpg.add_slider_float(label=f"Head Trans {_ax}", tag=f"_slider_head_trans_{_ax}", width=200,
-                                         min_value=-0.1, max_value=0.1, default_value=0.0,
-                                         callback=make_head_trans_callback(132 + _i, _i))
+                _slider_width = 120
+                with dpg.table(header_row=False, borders_innerV=False, policy=dpg.mvTable_SizingFixedFit):
+                    dpg.add_table_column()  # X slider
+                    dpg.add_table_column()  # Y slider
+                    dpg.add_table_column()  # Z slider
+                    dpg.add_table_column()  # row label
+
+                    _rot_rows = [
+                        ("Jaw (°)",         [(f"_slider_jaw_{ax}",      -45., 45., callback_jaw)            for ax in ['X', 'Y', 'Z']]),
+                        ("Eyes (°)",        [(f"_slider_eye_100_{ax}",  -45., 45., callback_eyes)           for ax in ['X', 'Y', 'Z']]),
+                        ("Neck (°)",        [(f"_slider_neck_{ax}",     -45., 45., callback_neck)           for ax in ['X', 'Y', 'Z']]),
+                        # ("Head Trans",     [(f"_slider_head_trans_{ax}", -0.1, 0.1, make_head_trans_callback(132 + i)) for i, ax in enumerate(['X','Y','Z'])]),
+                    ]
+
+                    for _row_label, _sliders in _rot_rows:
+                        with dpg.table_row():
+                            for _tag, _mn, _mx, _cb in _sliders:
+                                dpg.add_slider_float(label="", tag=_tag, width=_slider_width,
+                                                     min_value=_mn, max_value=_mx, default_value=0.0,
+                                                     callback=_cb)
+                            dpg.add_text(_row_label)
+
+                    with dpg.table_row():
+                        for _label, _indent in [("Pitch", 40), ("Yaw", 44), ("Roll", 47)]:
+                            dpg.add_text(_label, indent=_indent)
+                        dpg.add_text("")
 
             # timestep slider and buttons
-            if self.num_timesteps != None:
-                def callback_set_current_frame(sender, app_data):
-                    if sender == "_slider_timestep":
-                        self.timestep = app_data
-                    elif sender in ["_button_timestep_plus", "_mvKey_Right"]:
-                        self.timestep = min(self.timestep + 1, self.num_timesteps - 1)
-                    elif sender in ["_button_timestep_minus", "_mvKey_Left"]:
-                        self.timestep = max(self.timestep - 1, 0)
-                    elif sender == "_mvKey_Home":
-                        self.timestep = 0
-                    elif sender == "_mvKey_End":
-                        self.timestep = self.num_timesteps - 1
-
-                    dpg.set_value("_slider_timestep", self.timestep)
-                    self.gaussians.select_mesh_by_timestep(self.timestep)
-
-                    self.need_update = True
-
-                with dpg.group(horizontal=True):
-                    dpg.add_button(label='-', tag="_button_timestep_minus", callback=callback_set_current_frame)
-                    dpg.add_button(label='+', tag="_button_timestep_plus", callback=callback_set_current_frame)
-                    dpg.add_slider_int(label="timestep", tag='_slider_timestep', width=153, min_value=0, max_value=self.num_timesteps - 1, format="%d",
-                                       default_value=0, callback=callback_set_current_frame)
+            # if self.num_timesteps != None:
+            #     def callback_set_current_frame(sender, app_data):
+            #         if sender == "_slider_timestep":
+            #             self.timestep = app_data
+            #         elif sender in ["_button_timestep_plus", "_mvKey_Right"]:
+            #             self.timestep = min(self.timestep + 1, self.num_timesteps - 1)
+            #         elif sender in ["_button_timestep_minus", "_mvKey_Left"]:
+            #             self.timestep = max(self.timestep - 1, 0)
+            #         elif sender == "_mvKey_Home":
+            #             self.timestep = 0
+            #         elif sender == "_mvKey_End":
+            #             self.timestep = self.num_timesteps - 1
+            #
+            #         dpg.set_value("_slider_timestep", self.timestep)
+            #         self.gaussians.select_mesh_by_timestep(self.timestep)
+            #
+            #         self.need_update = True
+            #
+            #     with dpg.group(horizontal=True):
+            #         dpg.add_button(label='-', tag="_button_timestep_minus", callback=callback_set_current_frame)
+            #         dpg.add_button(label='+', tag="_button_timestep_plus", callback=callback_set_current_frame)
+            #         dpg.add_slider_int(label="timestep", tag='_slider_timestep', width=153, min_value=0, max_value=self.num_timesteps - 1, format="%d",
+            #                            default_value=0, callback=callback_set_current_frame)
 
             # Inputs for avatar
             with dpg.group(horizontal=True):
@@ -629,21 +643,21 @@ class LocalViewer(Mini3DViewer):
                 dpg.add_button(label="Take Picture & Create Avatar", tag="_button_picture_create_avatar", callback=callback_create_picture_create_avatar)
 
         # widget-dependent handlers ========================================================================================
-        with dpg.handler_registry():
-            dpg.add_key_press_handler(dpg.mvKey_Left, callback=callback_set_current_frame, tag='_mvKey_Left')
-            dpg.add_key_press_handler(dpg.mvKey_Right, callback=callback_set_current_frame, tag='_mvKey_Right')
-            dpg.add_key_press_handler(dpg.mvKey_Home, callback=callback_set_current_frame, tag='_mvKey_Home')
-            dpg.add_key_press_handler(dpg.mvKey_End, callback=callback_set_current_frame, tag='_mvKey_End')
-
-            def callbackmouse_wheel_slider(sender, app_data):
-                delta = app_data
-                if dpg.is_item_hovered("_slider_timestep"):
-                    self.timestep = min(max(self.timestep - delta, 0), self.num_timesteps - 1)
-                    dpg.set_value("_slider_timestep", self.timestep)
-                    self.gaussians.select_mesh_by_timestep(self.timestep)
-                    self.need_update = True
-
-            dpg.add_mouse_wheel_handler(callback=callbackmouse_wheel_slider)
+        # with dpg.handler_registry():
+        #     dpg.add_key_press_handler(dpg.mvKey_Left, callback=callback_set_current_frame, tag='_mvKey_Left')
+        #     dpg.add_key_press_handler(dpg.mvKey_Right, callback=callback_set_current_frame, tag='_mvKey_Right')
+        #     dpg.add_key_press_handler(dpg.mvKey_Home, callback=callback_set_current_frame, tag='_mvKey_Home')
+        #     dpg.add_key_press_handler(dpg.mvKey_End, callback=callback_set_current_frame, tag='_mvKey_End')
+        #
+        #     def callbackmouse_wheel_slider(sender, app_data):
+        #         delta = app_data
+        #         if dpg.is_item_hovered("_slider_timestep"):
+        #             self.timestep = min(max(self.timestep - delta, 0), self.num_timesteps - 1)
+        #             dpg.set_value("_slider_timestep", self.timestep)
+        #             self.gaussians.select_mesh_by_timestep(self.timestep)
+        #             self.need_update = True
+        #
+        #     dpg.add_mouse_wheel_handler(callback=callbackmouse_wheel_slider)
 
     def prepare_camera(self):
         @dataclass

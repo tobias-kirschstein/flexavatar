@@ -13,6 +13,7 @@ from tqdm import tqdm
 from visage.matting.modnet import MODNetMatter
 
 from flexavatar.config.dataset_config import SampleMetadata, FlexAvatarBatch
+from flexavatar.data_adapter.example_data import create_example_batch
 from flexavatar.data_adapter.in_the_wild_data_adapter import InTheWildDataAdapter
 from flexavatar.data_adapter.nersemble_data_adapter import NeRSembleDataAdapter
 from flexavatar.env import FLEXAVATAR_RENDERINGS_PATH
@@ -62,41 +63,7 @@ def main(source_person: str = 'marble_sculpture',
     # ----------------------------------------------------------
 
     data_adapter_source = InTheWildDataAdapter(source_person, expression_code_config=dataset_config.expression_code_config)
-
-    # 1. Load input image
-    sample_metadata = SampleMetadata(source_person, None, 0, None)
-    image = data_adapter_source.load_image(sample_metadata)
-
-    # 2. Mask out background from input image
-    image_torch = torch.tensor(image / 255, dtype=torch.float32).permute(2, 0, 1)[None]
-    modnet_matter = MODNetMatter()
-    with torch.no_grad():
-        alpha_maps = modnet_matter.parse(image_torch).cpu()
-    image_torch = image_torch * alpha_maps[:, None] + 1 - alpha_maps[:, None]
-
-    # 3. Load input camera pose (camera pose of input image relative to FLAME's head-centric space)
-    canonical_flame_to_world, _ = data_adapter_source.load_head_pose(sample_metadata)
-    input_cam2world_pose, input_intrinsics = data_adapter_source.load_camera_params(sample_metadata)
-
-    input_flame2world_pose = Pose(
-        canonical_flame_to_world.invert().numpy() @ input_cam2world_pose,
-        pose_type=PoseType.CAM_2_WORLD)  # Model takes input camera poses wrt head-centric FLAME space
-    input_intrinsics = input_intrinsics.rescale(1 / 512)  # Model takes input intrinsics in canonical form
-
-    # 4. Load expression code of input image (needed for fitting stage)
-    input_recordexpression_code = torch.tensor(data_adapter_source.load_expression_code(sample_metadata))[None, None]
-    batch = FlexAvatarBatch(image_torch[:, None],
-                            None,
-                            [[input_flame2world_pose]],
-                            [[input_intrinsics]],
-                            None,
-                            None,
-                            None,
-                            None,
-                            None,
-                            None,
-                            input_expression_codes=input_recordexpression_code,
-                            dataset_ids=torch.ones((1, 1), dtype=torch.long)) # bias sink: 1 = 3D
+    batch = create_example_batch(data_adapter_source, source_person)
     batch = batch.to(device)
 
     # 5. Compute DinoV2 features for input image

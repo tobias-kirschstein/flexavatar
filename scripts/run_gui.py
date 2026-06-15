@@ -25,7 +25,7 @@ from elias.util import ensure_directory_exists_for_file, save_img
 from elias.util.io import resize_img
 from gaussian_splatting.gaussian_renderer import render_gsplat
 from gaussian_splatting.scene import GaussianModel
-from pixel3dmm.utils.utils_3d import rotation_6d_to_matrix
+from pixel3dmm.utils.utils_3d import rotation_6d_to_matrix, matrix_to_rotation_6d
 from pytorch3d.transforms import quaternion_to_matrix, matrix_to_quaternion
 from scipy.spatial.transform import Rotation as R
 from visage.matting.modnet import MODNetMatter
@@ -126,6 +126,7 @@ class LocalViewer(Mini3DViewer):
         self._need_encoder = False
         self._lock_head = False
         self._live_reenactment = False
+        self._is_manual_animation = False
 
         #print("Initializing SHeaP...")
         # For real-time driving
@@ -198,6 +199,16 @@ class LocalViewer(Mini3DViewer):
 
         self._expression_codes = [torch.tensor(expression_code, dtype=torch.float32, device=device) for expression_code in expression_codes]
         self._last_expression_code = self._expression_codes[0]
+
+        neutral = torch.zeros(135, dtype=torch.float32, device=device)
+        identity_6d = torch.tensor([1, 0, 0, 0, 1, 0], dtype=torch.float32, device=device)
+        neutral[100:106] = identity_6d   # left eye
+        neutral[106:112] = identity_6d   # right eye
+        neutral[114:120] = identity_6d   # neck
+        neutral[120:126] = identity_6d   # jaw
+        neutral[126:132] = identity_6d   # head pose rotation
+        # neutral[132:135] stays zero    # head pose translation
+        self._manual_expression_code = neutral
 
         print("Producing sample avatar...")
         if self._avatar_code_manager.has_avatar_code(custom_avatar_name):
@@ -277,6 +288,8 @@ class LocalViewer(Mini3DViewer):
             # Real-time animation
             if self._live_reenactment:
                 expression_code = self._last_expression_code
+            elif self._is_manual_animation:
+                expression_code = self._manual_expression_code
             else:
                 expression_code = self._expression_codes[t]
 
@@ -420,6 +433,101 @@ class LocalViewer(Mini3DViewer):
 
                 dpg.add_spacer(width=10)
 
+            with dpg.group(horizontal=True):
+                def callback_manual_animation(sender, app_data):
+                    self._is_manual_animation = app_data
+                    dpg.configure_item("_group_expression_sliders", show=app_data)
+
+                dpg.add_checkbox(label="Manual Animation", default_value=self._is_manual_animation, callback=callback_manual_animation, tag="_checkbox_manual_animation")
+
+            with dpg.group(tag="_group_expression_sliders", show=self._is_manual_animation):
+                dpg.add_text("Expression Code Dimensions")
+
+                def make_expr_callback(dim):
+                    def callback(sender, app_data):
+                        self._manual_expression_code[dim] = app_data
+                    return callback
+
+                for _dim in range(10):
+                    dpg.add_slider_float(label=f"Dim {_dim}", tag=f"_slider_expr_dim_{_dim}", width=200,
+                                         min_value=-3.0, max_value=3.0, default_value=0.0,
+                                         callback=make_expr_callback(_dim))
+
+                dpg.add_separator()
+                dpg.add_text("Left Eye Rotation (Euler degrees)")
+
+                def make_eye_callback(offset):
+                    # offset: 100 for left eye, 106 for right eye
+                    axes = ['X', 'Y', 'Z']
+                    def callback(sender, app_data):
+                        euler_angles = [dpg.get_value(f"_slider_eye_{offset}_{ax}") for ax in axes]
+                        rot_matrix = torch.tensor(
+                            R.from_euler('xyz', euler_angles, degrees=True).as_matrix(),
+                            dtype=torch.float32, device=self._last_expression_code.device
+                        )
+                        rot6d = matrix_to_rotation_6d(rot_matrix)
+                        self._manual_expression_code[offset:offset + 6] = rot6d
+                    return callback
+
+                for _ax in ['X', 'Y', 'Z']:
+                    dpg.add_slider_float(label=f"Left Eye {_ax}", tag=f"_slider_eye_100_{_ax}", width=200,
+                                         min_value=-45.0, max_value=45.0, default_value=0.0,
+                                         callback=make_eye_callback(100))
+
+                dpg.add_separator()
+                dpg.add_text("Right Eye Rotation (Euler degrees)")
+
+                for _ax in ['X', 'Y', 'Z']:
+                    dpg.add_slider_float(label=f"Right Eye {_ax}", tag=f"_slider_eye_106_{_ax}", width=200,
+                                         min_value=-45.0, max_value=45.0, default_value=0.0,
+                                         callback=make_eye_callback(106))
+
+                dpg.add_separator()
+                dpg.add_text("Jaw Pose (Euler degrees)")
+
+                def callback_jaw(sender, app_data):
+                    euler_angles = [dpg.get_value(f"_slider_jaw_{ax}") for ax in ['X', 'Y', 'Z']]
+                    rot_matrix = torch.tensor(
+                        R.from_euler('xyz', euler_angles, degrees=True).as_matrix(),
+                        dtype=torch.float32, device=self._last_expression_code.device
+                    )
+                    rot6d = matrix_to_rotation_6d(rot_matrix)
+                    self._manual_expression_code[120:126] = rot6d
+
+                for _ax in ['X', 'Y', 'Z']:
+                    dpg.add_slider_float(label=f"Jaw {_ax}", tag=f"_slider_jaw_{_ax}", width=200,
+                                         min_value=-45.0, max_value=45.0, default_value=0.0,
+                                         callback=callback_jaw)
+
+                dpg.add_separator()
+                dpg.add_text("Head Pose Rotation (Euler degrees)")
+
+                def callback_head_rot(sender, app_data):
+                    euler_angles = [dpg.get_value(f"_slider_head_rot_{ax}") for ax in ['X', 'Y', 'Z']]
+                    rot_matrix = torch.tensor(
+                        R.from_euler('xyz', euler_angles, degrees=True).as_matrix(),
+                        dtype=torch.float32, device=self._last_expression_code.device
+                    )
+                    rot6d = matrix_to_rotation_6d(rot_matrix)
+                    self._manual_expression_code[126:132] = rot6d
+
+                for _ax in ['X', 'Y', 'Z']:
+                    dpg.add_slider_float(label=f"Head Rot {_ax}", tag=f"_slider_head_rot_{_ax}", width=200,
+                                         min_value=-45.0, max_value=45.0, default_value=0.0,
+                                         callback=callback_head_rot)
+
+                dpg.add_text("Head Pose Translation")
+
+                def make_head_trans_callback(dim, idx):
+                    def callback(sender, app_data):
+                        self._manual_expression_code[dim] = app_data
+                    return callback
+
+                for _i, _ax in enumerate(['X', 'Y', 'Z']):
+                    dpg.add_slider_float(label=f"Head Trans {_ax}", tag=f"_slider_head_trans_{_ax}", width=200,
+                                         min_value=-0.1, max_value=0.1, default_value=0.0,
+                                         callback=make_head_trans_callback(132 + _i, _i))
+
             # timestep slider and buttons
             if self.num_timesteps != None:
                 def callback_set_current_frame(sender, app_data):
@@ -482,16 +590,6 @@ class LocalViewer(Mini3DViewer):
                     # dpg.set_value("_slider_fovy", self.cam.fovy)
 
                 dpg.add_button(label="reset camera", tag="_button_reset_pose", callback=callback_reset_camera, show=not self.cfg.demo_mode)
-
-                def callback_cache_camera(sender, app_data):
-                    self.cam.save()
-
-                dpg.add_button(label="cache camera", tag="_button_cache_pose", callback=callback_cache_camera, show=not self.cfg.demo_mode)
-
-                def callback_clear_cache(sender, app_data):
-                    self.cam.clear()
-
-                dpg.add_button(label="clear cache", tag="_button_clear_cache", callback=callback_clear_cache, show=not self.cfg.demo_mode)
 
             with dpg.group():
                 with dpg.texture_registry(show=False):

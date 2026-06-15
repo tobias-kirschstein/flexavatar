@@ -9,7 +9,8 @@ class DinoV2(nn.Module):
 
     def __init__(self, dino_name: str = 'dinov2_vitg14_reg'):
         super().__init__()
-        self._dino = torch.hub.load('facebookresearch/dinov2', dino_name)
+        self._dino = torch.hub.load('facebookresearch/dinov2:85a24602099d397264d5b30461ad7f3bfd726ca1', dino_name,
+                                    trust_repo=True, skip_validation=True)
         self._dino.eval()
         self._dino.cuda()
 

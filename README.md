@@ -38,6 +38,8 @@ From the paper *"FlexAvatar: Learning Complete 3D Head Avatars with Partial Supe
 # 2. Usage 
 
 ## 2.1. Render & Animate Example Avatars
+![](static/rendering_marble_sculpture.gif)
+
 The folder [data/inputs/itw](data/inputs/itw) contains example input images for which all preprocessing files are already present in the repository.
 For these images, 3D head avatars can be created and rendered via:
 ```shell
@@ -51,8 +53,6 @@ The script supports these parameters among others:
 
 The resulting renderings will be stored in the `renderings` folder in the repository.
 Additionally, the corresponding avatar code will be stored in `data/avatar_codes/avatar_code_${source_person}.npy`. The avatar code can will be loaded automatically by future instantiations of the rendering script to skip the avatar creation and fitting stages. It can also be loaded by the GUI (see [section 2.4](#24-interactive-viewer))
-
-![](static/rendering_marble_sculpture.gif)
 
 ## 2.2. Create Avatars for Custom Inputs
 ![](static/flexavatar_script_demo.gif)

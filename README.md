@@ -49,10 +49,11 @@ The script supports these parameters among others:
  * `--source_person ${source_person}`: Which avatar to create (available ones are in `data/inputs/itw`)
  * `--driving_sequence $seq`: Which video should be used to reenact the avatar. By default, you can choose driving videos from the NeRSemble dataset (available ones are in `data/pixel3dmm_processing/tracking/nersemble/240`). If `--use_itw_driver` is set, you can instead use your own tracked video to animate the avatar (see [section 2.2](#22-create-avatars-for-custom-inputs) for tracking)
  * `--render_360`: Render a 360° trajectory instead of the default frontal circular trajectory
+ * `--load_avatar_code`: Load a previously stored avatar code to skip the avatar creation and fitting stages
  * `--help`: Display more options
 
 The resulting renderings will be stored in the `renderings` folder in the repository.
-Additionally, the corresponding avatar code will be stored in `data/avatar_codes/avatar_code_${source_person}.npy`. The avatar code can will be loaded automatically by future instantiations of the rendering script to skip the avatar creation and fitting stages. It can also be loaded by the GUI (see [section 2.4](#24-interactive-viewer))
+Additionally, the corresponding avatar code will be stored in `data/avatar_codes/avatar_code_${source_person}.npy`. The avatar code can be loaded by future instantiations of the rendering script (by setting `--load_avatar_code`) to skip the avatar creation and fitting stages. It can also be loaded by the GUI (see [section 2.4](#24-interactive-viewer))
 
 ## 2.2. Create Avatars for Custom Inputs
 ![](static/flexavatar_script_demo.gif)

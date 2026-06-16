@@ -51,6 +51,7 @@ The script supports these parameters among others:
 
 The resulting renderings will be stored in the `renderings` folder in the repository.
 Additionally, the corresponding avatar code will be stored in `data/avatar_codes/avatar_code_${source_person}.npy`. The avatar code can will be loaded automatically by future instantiations of the rendering script to skip the avatar creation and fitting stages. It can also be loaded by the GUI (see [section 2.4](#24-interactive-viewer))
+
 ![](static/rendering_marble_sculpture.gif)
 
 ## 2.2. Create Avatars for Custom Inputs

@@ -33,5 +33,6 @@ dependencies:
       - git+https://github.com/tobias-kirschstein/stylegan-generators.git
       - gaussian_splatting@git+https://github.com/tobias-kirschstein/gaussian-splatting.git
       - modnet@git+https://github.com/tobias-kirschstein/MODNet.git
+      - git+https://github.com/tobias-kirschstein/sheap-3.9.git
       - diffusers
       - mediapy

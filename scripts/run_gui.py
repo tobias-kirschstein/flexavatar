@@ -37,6 +37,7 @@ from flexavatar.data_adapter.nersemble_data_adapter import NeRSembleDataAdapter
 from flexavatar.env import FLEXAVATAR_INPUTS_PATH, FLEXAVATAR_AVATAR_CODE_PATH
 from flexavatar.model.flexavatar_preprocessor import FlexAvatarPreprocessor
 from flexavatar.model.inversion import FittingManager, FittingConfig
+from flexavatar.model.sheap import SheapModule
 from flexavatar.model_manager.avatar_code_manager import AvatarCodeManager
 from flexavatar.model_manager.flexavatar_model_manager import FlexAvatarModelManager
 from flexavatar.util.codes import interpolate_codes
@@ -130,7 +131,7 @@ class LocalViewer(Mini3DViewer):
 
         #print("Initializing SHeaP...")
         # For real-time driving
-        #self._sheap_module = SheapModule()
+        self._sheap_module = None
         self._cam_capture = cv2.VideoCapture(0)
         self._cam_capture = cv2.VideoCapture(0, cv2.CAP_DSHOW)
 
@@ -149,7 +150,7 @@ class LocalViewer(Mini3DViewer):
         self.last_time_animate = None
         self.start_animation_thread()
 
-        super().__init__(cfg, 'GaussianAvatars - Local Viewer')
+        super().__init__(cfg, 'FlexAvatar - Local Viewer')
         dpg.maximize_viewport()
 
         dpg.set_exit_callback(self._on_close_window)
@@ -318,6 +319,11 @@ class LocalViewer(Mini3DViewer):
             self.gaussians = gaussians
 
     def _start_live_reenactment(self):
+        if self._sheap_module is None:
+            print("Setting up SHeaP for live-reenactment...")
+            # Lazy-load SHeaP such that startup time is not impaired
+            self._sheap_module = SheapModule()
+
         thread = Thread(target=self._live_reenactment_worker)
         thread.start()
 

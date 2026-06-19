@@ -101,6 +101,11 @@ It supports:
 
 Note, you need to run `render_example.py` once before such that the GUI has an avatar code to load.
 
+For live-reenactment to work, make sure you have `SHeaP` installed:
+```shell
+pip install git+https://github.com/tobias-kirschstein/sheap-3.9.git
+```
+
 <hr>
 
 If you find this repository useful please consider citing

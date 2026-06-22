@@ -29,7 +29,9 @@ def main(source_person: str = 'marble_sculpture',
          run_fitting: bool = True,
          render_360: bool = False,
          load_avatar_code: bool = False,
-         use_itw_driver: bool = False):
+         use_itw_driver: bool = False,
+         n_input_frames: int = 1,
+         n_fitting_steps: int = 200):
     """
 
     Parameters
@@ -49,6 +51,11 @@ def main(source_person: str = 'marble_sculpture',
     use_itw_driver:
         If true, load driving expression codes from an in-the-wild tracked video.
         In this case, the `driving_sequence` parameter indicates the video name of the driving video.
+    n_input_frames:
+        How many input images should be used for the fitting stage. Only relevant for avatars created from .mp4 or folders where multiple frames are available.
+    n_fitting_steps:
+        How many optimization steps should be used during fitting. For avatars where more input images are available, it can make sense to increase this number
+        for better results.
     """
 
     model_name = 'FLEX-1'
@@ -64,7 +71,7 @@ def main(source_person: str = 'marble_sculpture',
     # ----------------------------------------------------------
 
     data_adapter_source = InTheWildDataAdapter(source_person, expression_code_config=dataset_config.expression_code_config)
-    batch = create_example_batch(data_adapter_source, source_person)
+    batch = create_example_batch(data_adapter_source, source_person, n_frames=n_input_frames)
     batch = batch.to(device)
 
     # 5. Compute DinoV2 features for input image
@@ -115,10 +122,14 @@ def main(source_person: str = 'marble_sculpture',
         avatar_code = avatar_code.to(device)
     elif run_fitting:
         # Run fitting stage to refine avatar code from encoder
-        fitting_config = FittingConfig()
+        fitting_config = FittingConfig(steps=n_fitting_steps)
         fitting_manager = FittingManager(model, fitting_config)
         avatar_code, fitting_history, _ = fitting_manager.run_inversion(batch)
-        output_path = f"{output_folder}/fitting_history_{source_person}.mp4"
+
+        output_name = f"fitting_history_p{source_person}"
+        if n_input_frames != 1:
+            output_name += f"_in{n_input_frames}"
+        output_path = f"{output_folder}/{output_name}.mp4"
         ensure_directory_exists_for_file(output_path)
         mediapy.write_video(output_path, fitting_history)
     else:
@@ -157,6 +168,8 @@ def main(source_person: str = 'marble_sculpture',
         output_name += f"_dr{driving_sequence}"
     if render_360:
         output_name += f"_360"
+    if n_input_frames != 1:
+        output_name += f"_in{n_input_frames}"
 
     output_path = f"{output_folder}/{output_name}.mp4"
     ensure_directory_exists_for_file(output_path)

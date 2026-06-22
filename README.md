@@ -8,6 +8,13 @@ From the paper *"FlexAvatar: Learning Complete 3D Head Avatars with Partial Supe
 [Tobias Kirschstein](https://tobias-kirschstein.github.io/), [Simon Giebenhain](https://simongiebenhain.github.io/), [Matthias Nießner](https://www.niessnerlab.org/)  
 **CVPR 2026**
 
+## Changelog
+ - 22.06.2026: Add avatar creation from multiple images
+ - 19.06.2026: Add Live Re-enactment. Ensure to have `SHeaP` installed:
+   ```shell
+   pip install git+https://github.com/tobias-kirschstein/sheap-3.9.git
+   ```
+
 ## 1. Setup
 
 ### 1.1. Quick Setup (only example inference)
@@ -50,6 +57,7 @@ The script supports these parameters among others:
  * `--driving_sequence $seq`: Which video should be used to reenact the avatar. By default, you can choose driving videos from the NeRSemble dataset (available ones are in `data/pixel3dmm_processing/tracking/nersemble/240`). If `--use_itw_driver` is set, you can instead use your own tracked video to animate the avatar (see [section 2.2](#22-create-avatars-for-custom-inputs) for tracking)
  * `--render_360`: Render a 360° trajectory instead of the default frontal circular trajectory
  * `--load_avatar_code`: Load a previously stored avatar code to skip the avatar creation and fitting stages
+ * `--n_input_frames`: For avatars created from a `.mp4` or folder of images, specify how many images should be used for avatar creation. `-1` indicates to use all images. Default: `1`
  * `--help`: Display more options
 
 The resulting renderings will be stored in the `renderings` folder in the repository.
@@ -60,7 +68,10 @@ Additionally, the corresponding avatar code will be stored in `data/avatar_codes
 
 Ensure you have run the full setup instructions following [section 1.2](#12-full-setup).
 
-1. Put any portrait image (.jpg/.png) into `data/inputs/itw`. For example `${source_person}.jpg`
+1. Put your source images/videos into `data/inputs/itw`. There are 3 different ways to do so:
+   - `${source_person}.jpg` or `${source_person}.png`: Process a single image
+   - `${source_person}.mp4`: Process all frames of a video
+   - Folder of `${source_person}/*.jpg`: Process all images in a folder 
 2. Run Pixel3DMM tracking via
    ```shell
    python scripts/track_pixel3dmm_itw.py ${source_person} 

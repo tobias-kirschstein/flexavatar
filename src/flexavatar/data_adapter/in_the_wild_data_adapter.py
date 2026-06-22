@@ -1,4 +1,5 @@
 import math
+import os
 from pathlib import Path
 from typing import Union, List, Tuple
 
@@ -25,6 +26,9 @@ class InTheWildDataAdapter(Pixel3DMMDataAdapter):
         if self.is_video():
             video_reader = VideoFrameLoader(image_path)
             image = video_reader.load_frame(sample_metadata.timestep)
+        elif self.is_folder():
+            files_names = sorted(os.listdir(image_path))
+            image = load_img(f"{image_path}/{files_names[sample_metadata.timestep]}")
         else:
             image = load_img(image_path)[..., :3]
         crop_params = np.load(self._get_crop_params_path())
@@ -76,6 +80,10 @@ class InTheWildDataAdapter(Pixel3DMMDataAdapter):
                 video_loader = VideoFrameLoader(image_path)
                 dimensions = video_loader.get_dimensions()
                 image_height = dimensions.h
+            elif self.is_folder():
+                file_names = sorted(os.listdir(image_path))
+                real_image_path = f"{image_path}/{file_names[sample_metadata.timestep]}"
+                image_height = Image.open(real_image_path).size[1]
             else:
                 image_height = Image.open(image_path).size[1]
             crop_params = np.load(self._get_crop_params_path())
@@ -112,10 +120,19 @@ class InTheWildDataAdapter(Pixel3DMMDataAdapter):
         is_video = image_path.endswith('.mp4') and Path(image_path).exists()
         return is_video
 
+    def is_folder(self) -> bool:
+        image_folder_path = self.get_image_path(self._video_key)
+        is_folder = Path(image_folder_path).exists() and Path(image_folder_path).is_dir()
+        return is_folder
+
     def list_timesteps(self, sample_metadata: SampleMetadata = None) -> List[int]:
         if self.is_video():
             video_reader = VideoFrameLoader(self.get_image_path(self._video_key))
             timesteps = list(range(video_reader.get_n_frames()))
+            return timesteps
+        elif self.is_folder():
+            files_names = os.listdir(self.get_image_path(self._video_key))
+            timesteps = list(range(len(files_names)))
             return timesteps
         else:
             return [0]
@@ -124,6 +141,10 @@ class InTheWildDataAdapter(Pixel3DMMDataAdapter):
         return image
 
     def get_image_path(self, image_name: str) -> str:
+        image_folder_path = f"{FLEXAVATAR_INPUTS_PATH}/itw/{image_name}"
+        if Path(image_folder_path).exists():
+            return image_folder_path
+
         image_path = f"{FLEXAVATAR_INPUTS_PATH}/itw/{image_name}.png"
         if not Path(image_path).exists():
             image_path = f"{FLEXAVATAR_INPUTS_PATH}/itw/{image_name}.mp4"

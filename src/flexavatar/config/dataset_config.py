@@ -39,7 +39,7 @@ class MVDatasetConfig(Config):
     dino_name: str = 'dinov2_vitg14_reg'
     load_precomputed_dino: bool = False
     load_expression_codes: bool = False
-    expression_code_config: ExpressionCodeConfig = ExpressionCodeConfig()
+    expression_code_config: ExpressionCodeConfig = field(default_factory=ExpressionCodeConfig)
     load_input_expression_codes: bool = False
     load_render_head_poses: bool = False
 

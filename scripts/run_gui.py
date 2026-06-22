@@ -138,6 +138,12 @@ class LocalViewer(Mini3DViewer):
         self._cam_capture.set(cv2.CAP_PROP_FRAME_WIDTH, 1920)
         self._cam_capture.set(cv2.CAP_PROP_FRAME_HEIGHT, 1080)
         ret, frame = self._cam_capture.read()
+        if not ret or frame is None:
+            # No webcam available (e.g. headless machine): fall back to a black frame
+            # so the GUI can still start without live capture.
+            print("WARNING: no webcam available, using a black placeholder frame.")
+            frame = np.zeros((1080, 1920, 3), dtype=np.uint8)
+
         self._webcam_buffer = np.zeros_like(resize_img(frame, 1/3), dtype=np.float32)
         self._webcam_buffer_large = None
         self._webcam_recording = False

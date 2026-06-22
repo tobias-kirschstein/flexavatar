@@ -15,6 +15,15 @@ from flexavatar.config.expression_config import ExpressionCodeConfig
 from flexavatar.data_adapter.base_data_adapter import BaseDataAdapter
 from flexavatar.util.rotation import rotation_6d_to_matrix
 
+def _nearest_rotation(matrix: np.ndarray) -> np.ndarray:
+    # Project a near-orthonormal 3x3 matrix onto the closest proper rotation (det = +1).
+    u, _, vt = np.linalg.svd(matrix)
+    rotation = u @ vt
+    if np.linalg.det(rotation) < 0:
+        u[:, -1] *= -1
+        rotation = u @ vt
+    return rotation.astype(matrix.dtype)
+
 
 class Pixel3DMMDataAdapter(BaseDataAdapter):
 
@@ -44,6 +53,10 @@ class Pixel3DMMDataAdapter(BaseDataAdapter):
         flame2world[:3, 3] = np.squeeze(tracking['flame']['t'])
         # TODO include neck transform as well
         canonical_flame_to_world = flame2world @ tracking['joint_transforms'][0, 1, :, :]
+        # The rotation block is a product of (float32) rotations, so accumulated numerical
+        # error makes it fail dreifus' strict orthonormality check. Re-orthonormalize via SVD
+        # (project onto the nearest valid rotation matrix) before constructing the Pose.
+        canonical_flame_to_world[:3, :3] = _nearest_rotation(canonical_flame_to_world[:3, :3])
         canonical_flame_to_world = Pose(canonical_flame_to_world)
 
         return canonical_flame_to_world, 1

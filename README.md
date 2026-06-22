@@ -53,8 +53,8 @@ For these images, 3D head avatars can be created and rendered via:
 python scripts/render_example.py
 ```
 The script supports these parameters among others:
- * `--source_person ${source_person}`: Which avatar to create (available ones are in `data/inputs/itw`)
- * `--driving_sequence $seq`: Which video should be used to reenact the avatar. By default, you can choose driving videos from the NeRSemble dataset (available ones are in `data/pixel3dmm_processing/tracking/nersemble/240`). If `--use_itw_driver` is set, you can instead use your own tracked video to animate the avatar (see [section 2.2](#22-create-avatars-for-custom-inputs) for tracking)
+ * `${source_person}`: Which avatar to create (available ones are in `data/inputs/itw`)
+ * `${driving_sequence}`: Which video should be used to reenact the avatar. By default, you can choose driving videos from the NeRSemble dataset (available ones are in `data/pixel3dmm_processing/tracking/nersemble/240`). If `--use_itw_driver` is set, you can instead use your own tracked video to animate the avatar (see [section 2.2](#22-create-avatars-for-custom-inputs) for tracking)
  * `--render_360`: Render a 360° trajectory instead of the default frontal circular trajectory
  * `--load_avatar_code`: Load a previously stored avatar code to skip the avatar creation and fitting stages
  * `--n_input_frames`: For avatars created from a `.mp4` or folder of images, specify how many images should be used for avatar creation. `-1` indicates to use all images. Default: `1`
@@ -79,7 +79,7 @@ Ensure you have run the full setup instructions following [section 1.2](#12-full
    The resulting tracking output will be written into `data/pixel3dmm_processing/tracking/itw/${source_person}`.
 3. Now you can create and render your avatar as described in [section 2.1](#21-render--animate-example-avatars), e.g. via 
    ```shell
-   python scripts/render_example.py --source_person ${source_person}
+   python scripts/render_example.py ${source_person}
    ```
 
 ## 2.3. Drive Avatars with Custom Videos
@@ -92,7 +92,7 @@ Ensure you have run the full setup instructions following [section 1.2](#12-full
    ```
 3. You can now use your tracked driving video to animate an avatar as described in [section 2.1](#21-render--animate-example-avatars), e.g. via
    ```shell
-   python scripts/render_example.py --driving_sequence ${driving_video} --use_itw_driver
+   python scripts/render_example.py ${source_person} ${driving_video} --use_itw_driver
    ```
 
 ## 2.4. Interactive Viewer

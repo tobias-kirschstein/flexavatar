@@ -27,7 +27,7 @@ From the paper *"FlexAvatar: Learning Complete 3D Head Avatars with Partial Supe
     ```shell
     pip install -e .
     ```
-3. Download the pre-trained `FlexAvatar` model weights file from [https://nextcloud.tobias-kirschstein.de/index.php/s/X29kqKNndpSAKfB](https://nextcloud.tobias-kirschstein.de/index.php/s/X29kqKNndpSAKfB) and put it into `models/FLEX-1/checkpoints/ckpt-900k.pt`.
+3. Download the pre-trained `FlexAvatar` model weights file from [https://kaldir.vc.cit.tum.de/flexavatar/models/FLEX-1/checkpoints/ckpt-900k.pt](https://kaldir.vc.cit.tum.de/flexavatar/models/FLEX-1/checkpoints/ckpt-900k.pt) and put it into `models/FLEX-1/checkpoints/ckpt-900k.pt`.
 
 ### 1.2. Full Setup
 

@@ -9,6 +9,7 @@ From the paper *"FlexAvatar: Learning Complete 3D Head Avatars with Partial Supe
 **CVPR 2026**
 
 ## Changelog
+ - 25.06.2026: Add evaluation on VFHQ-Test
  - 22.06.2026: Add avatar creation from multiple images
  - 19.06.2026: Add Live Re-enactment. Ensure to have `SHeaP` installed:
    ```shell
@@ -116,6 +117,52 @@ For live-reenactment to work, make sure you have `SHeaP` installed:
 ```shell
 pip install git+https://github.com/tobias-kirschstein/sheap-3.9.git
 ```
+
+## 3. Evaluation
+
+### 3.1. Portrait Animation Comparison on VFHQ-Test
+
+#### 3.1.1. VFHQ-Test Setup
+
+1. Download the VFHQ-Test split: https://liangbinxie.github.io/projects/vfhq/ (2.37 GB)
+2. Extract the images into `data/datasets/VFHQ-Test` such that you end up with the following folder structure:
+   ```yaml
+   data/datasets/VFHQ-Test
+    ├── Clip+_HebIzK_LP4+P2+C1+F16589-16715   
+    │   ├── 00000000.png  
+    │   ├── 00000001.png  
+    │   ⋮
+    ├── Clip+-1Jouc19Ixo+P0+C1+F4196-4320        
+    ⋮
+   ```
+3. Run Pixel3DMM tracking via `python scripts/track_pixel3dmm_vfhq.py`
+4. Run MatAnyone on the VFHQ-Test images via `python scripts/run_matanyone.py`
+
+#### 3.1.2 VFHQ-Test Evaluation
+
+To safe computational resources, the evaluation is only performed on 50 frames from every test video (=2500 image comparisons in total)
+
+##### Self-Reenactment
+
+1. Obtain model predictions via `python scripts/evaluate.py FLEX-1 --run_fitting --black`. They will be stored in `evaluations/FLEX-1_inv-200_black`
+2. Compute metrics with GAGAvatar's evaluation protocol via `python scripts/compute_metrics.py FLEX-1 --run_fitting --black --crop_vfhq`. The evaluation result will be stored in `evaluations/FLEX-1_inv-200_black/evaluation_VFHQ-Test_ckpt900k_crop-vfhq.json`  
+  
+    **[Alternative]** if you also want to compute the Average Expression Distance (AED) and Average Pose Distance (APD) metric based on the Basel Face Model (BFM), you need to do the following:
+   1. Ensure you have the `eg3d-preprocessor` library installed: `pip install git+https://github.com/tobias-kirschstein/eg3d-preprocessor`
+   2. Get access to BFM at https://faces.dmi.unibas.ch/bfm/main.php?nav=1-2&id=downloads and download the archive
+   3. Put the `01_MorphableModel.mat` file into `~/.cache/BFM/01_MorphableModel.mat` 
+   4. Run `python scripts/compute_metrics.py FLEX-1 --run_fitting --black --crop_vfhq --calc_apd` instead
+
+##### Cross-Reenactment
+Run the steps from `1.` and `2.` under self-reenactment but additionally with the `--use_cross_reenactment` flag. This requires BFM to be setup.
+
+### 3.2. Evaluation Results
+
+The numbers slightly deviate from the paper due to the released checkpoint being different.
+
+| Model  | Dataset   | Flags                               | PSNR  | SSIM  | LPIPS | CSIM  | AED   | APD   | AKD   | CSIM (CR) | AED (CR) | APD (CR) |
+|--------|-----------|-------------------------------------|-------|-------|-------|-------|-------|-------|-------|-----------|----------|----------|
+| FLEX-1 | VFHQ-Test | `--run_fitting --black --crop_vfhq` | 23.32 | 0.835 | 0.099 | 0.828 | 0.087 | 0.010 | 3.007 | 0.650     | 0.247    | 0.026    |
 
 <hr>
 

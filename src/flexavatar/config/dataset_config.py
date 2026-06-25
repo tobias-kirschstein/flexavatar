@@ -63,8 +63,6 @@ class MVDatasetConfig(Config):
     bg_color: Optional[Tuple[int, int, int]] = None
     augmentation_datasets: List[str] = field(default_factory=lambda: ['nersemble', 'cafca', 'ava256'])
     use_dataset_ids: bool = False
-    use_separate_dataset_ids: bool = False
-    use_nersemble_dataset_ids: bool = False  # 17 embeddings: 16 for nersemble cameras + 1 for everything else
     prob_nvs_task: float = 0  # Probability that a sample will be for an NVS task (input timestep = output timestep, expr codes = 0s)
     temp_jaw_angle: float = 0  # Temperature for sampling more open mouths. 0 == uniform sampling, 1 == prob of timestep is FLAME jaw angle
 
@@ -74,8 +72,6 @@ class MVDatasetConfig(Config):
     use_celebvhq: bool = False
     use_nersemble: bool = True
     use_ava256: bool = False
-    use_hold_out_ids: bool = False  # Rather naive way to get unseen identities
-    use_hold_out_ids2: bool = False  # Rather naive way to get unseen identities
     # NeRSemble
     apply_color_correction: bool = False
     filter_bad_videos: bool = False
@@ -127,12 +123,26 @@ class MVDatasetConfig(Config):
                               prob_nvs_task=0,
                               percentage_3d_participants=None)
 
+    def make_vfhq_test_eval(self, use_cross_reenactment: bool = False, n_target_timesteps: int = 50) -> 'MVDatasetConfig':
+        return better_replace(self,
+                              n_participants=50,
+                              n_target_views=1,
+                              n_target_timesteps=n_target_timesteps,
+                              target_view_sampling='sequential',
+                              input_view_sampling='frontal',
+                              input_timestep_sampling='first_frame',
+                              target_timestep_sampling='evenly_spaced',
+                              use_random_target_cropping=False,
+                              use_random_input_cropping=False,
+                              use_random_bg_color=False,
+                              use_image_augmentations=False,
+                              use_cross_reenactment=use_cross_reenactment,
+                              prob_nvs_task=0,
+                              percentage_3d_participants=None)
 
 
 DatasetType = Literal[
-    'nersemble', 'cafca', 'celebvtext', 'hello3', 'in_the_wild', 'phone_scan', 'ava256', 'ava256_avat3r', 'vfhq_test', 'vfhq_test_50', 'nersemble_benchmark', 'ava256_static', 'ava256_static_back']
-DATASET_ID_MAPPING = ['nersemble', 'cafca', 'ava256', 'celebvtext', 'hello3', 'in_the_wild', 'phone_scan', 'vfhq_test', 'vfhq_test_50', 'ava256_avat3r',
-                      'nersemble_benchmark']
+    'nersemble', 'cafca', 'celebvtext', 'hello3', 'in_the_wild', 'phone_scan', 'ava256', 'ava256_avat3r', 'VFHQ-Test', 'nersemble_benchmark', 'ava256_static', 'ava256_static_back']
 
 
 @dataclass(order=True)

@@ -1,0 +1,3 @@
+[submodule "submodules/matanyone"]
+	path = submodules/matanyone
+	url = git@github.com:pq-yang/MatAnyone.git

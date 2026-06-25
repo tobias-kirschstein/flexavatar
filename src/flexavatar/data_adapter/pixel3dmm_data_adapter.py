@@ -1,8 +1,6 @@
 from abc import abstractmethod
-from dataclasses import replace
 from pathlib import Path
-from typing import Union, List, Tuple, Optional, Literal
-from zipfile import ZipFile
+from typing import Union, List, Tuple, Optional
 
 import numpy as np
 import torch
@@ -13,7 +11,9 @@ from elias.util import load_img
 from flexavatar.config.dataset_config import SampleMetadata
 from flexavatar.config.expression_config import ExpressionCodeConfig
 from flexavatar.data_adapter.base_data_adapter import BaseDataAdapter
+from flexavatar.env import FLEXAVATAR_MATANYONE_PROCESSING_PATH
 from flexavatar.util.rotation import rotation_6d_to_matrix
+
 
 def _nearest_rotation(matrix: np.ndarray) -> np.ndarray:
     # Project a near-orthonormal 3x3 matrix onto the closest proper rotation (det = +1).
@@ -38,7 +38,7 @@ class Pixel3DMMDataAdapter(BaseDataAdapter):
         return image
 
     def load_mask(self, sample_metadata: SampleMetadata) -> np.ndarray:
-        mask_path = f"{PHO3DMM_MATANYONE_PATH}/{sample_metadata.dataset}/{self._video_key}/{sample_metadata.timestep:05d}.png"
+        mask_path = f"{FLEXAVATAR_MATANYONE_PROCESSING_PATH}/{sample_metadata.dataset}/{self._video_key}/{sample_metadata.timestep:05d}.png"
         mask = load_img(mask_path)
 
         return mask

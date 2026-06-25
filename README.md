@@ -140,7 +140,7 @@ pip install git+https://github.com/tobias-kirschstein/sheap-3.9.git
 
 #### 3.1.2 VFHQ-Test Evaluation
 
-To safe computational resources, the evaluation is only performed on 50 frames from every test video (=2500 image comparisons in total)
+To save computational resources, the evaluation is only performed on 50 frames from every test video (=2500 image comparisons in total)
 
 ##### Self-Reenactment
 

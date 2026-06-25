@@ -48,6 +48,7 @@ def main(run_name: str = 'FLEX-1',
          black: bool = False):
     """
     Loads pairs of stored prediction/target images for computing evaluation metrics.
+    It automatically loads all available pairs of stored prediction/target images.
     Any flag that was used for `evaluate.py` should also be used here to ensure to correct images are loaded.
 
     Parameters

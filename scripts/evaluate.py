@@ -52,7 +52,7 @@ def main(model_name: str = 'FLEX-1', /,
     full_video:
         Only for VFHQ-Test evaluation. If set, predict images for all video frames and store animated portrait videos
     n_frames_vfhq:
-        Only for VFHQ-Test evaluation. How many frames per video should be used for evaluation
+        Only for VFHQ-Test evaluation. How many frames per video should be used for evaluation. Lower this for faster evaluation
     """
 
     evaluator = PairedFaceImageEvaluator(exclude_mssim=True)

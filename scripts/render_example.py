@@ -26,6 +26,7 @@ from flexavatar.model_manager.flexavatar_model_manager import FlexAvatarModelMan
 def main(source_person: str = 'marble_sculpture',
          driving_sequence: str = 'EMO-1-shout+laugh',
          /,
+         model_name: str = 'FLEX-1',
          run_fitting: bool = True,
          render_360: bool = False,
          load_avatar_code: bool = False,
@@ -42,6 +43,11 @@ def main(source_person: str = 'marble_sculpture',
     driving_sequence:
         driving video used to animate the avatar.
         Available driving sequences are in data/pixel3dmm_processing/tracking/nersemble/240
+    model_name:
+        Which FlexAvatar model to load. Available options:
+            * FLEX-1 (default): The main FlexAvatar model which was trained on all datasets
+            * FLEX-2-avat3r-eval: FlexAvatar model used for comparison with Avat3r (row 3 in Table 1 of the paper). It excludes the 12 test persons from Avat3r.
+                For the evaluation protocol see "assets/evaluation_metadata_avat3r_filtered.json".
     run_fitting:
         Whether to run the fitting stage of FlexAvatar.
     render_360:
@@ -58,7 +64,6 @@ def main(source_person: str = 'marble_sculpture',
         for better results.
     """
 
-    model_name = 'FLEX-1'
     checkpoint = 900
     device = torch.device('cuda')
     output_folder = FLEXAVATAR_RENDERINGS_PATH

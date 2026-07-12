@@ -9,6 +9,7 @@ From the paper *"FlexAvatar: Learning Complete 3D Head Avatars with Partial Supe
 **CVPR 2026**
 
 ## Changelog
+ - 12.07.2027: Release FLEX-2-avat3r-eval model
  - 25.06.2026: Add evaluation on VFHQ-Test
  - 22.06.2026: Add avatar creation from multiple images
  - 19.06.2026: Add Live Re-enactment. Ensure to have `SHeaP` installed:
@@ -28,7 +29,12 @@ From the paper *"FlexAvatar: Learning Complete 3D Head Avatars with Partial Supe
     ```shell
     pip install -e .
     ```
-3. Download the pre-trained `FlexAvatar` model weights file from [https://kaldir.vc.cit.tum.de/flexavatar/models/FLEX-1/checkpoints/ckpt-900k.pt](https://kaldir.vc.cit.tum.de/flexavatar/models/FLEX-1/checkpoints/ckpt-900k.pt) and put it into `models/FLEX-1/checkpoints/ckpt-900k.pt`.
+3. Download the pre-trained `FlexAvatar` model weights that you want and put them into `models/${MODEL_NAME}/checkpoints/ckpt-900k.pt`. 
+
+   | Model name         | Description                                                                                                                              | Checkpoint download                                                                                                                       |
+   |--------------------|------------------------------------------------------------------------------------------------------------------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------|
+   | FLEX-1             | Main FlexAvatar Model trained on all datasets                                                                                            | [FLEX-1/checkpoints/ckpt-900k.pt](https://kaldir.vc.cit.tum.de/flexavatar/models/FLEX-1/checkpoints/ckpt-900k.pt)                         |
+   | FLEX-2-avat3r-eval | FlexAvatar model used for comparison with Avat3r (row 3 in Table 1 of the paper). It was not trained on the 12 test persons from Avat3r. | [FLEX-2-avat3r-eval/checkpoints/ckpt-900k.pt](https://kaldir.vc.cit.tum.de/flexavatar/models/FLEX-2-avat3r-eval/checkpoints/ckpt-900k.pt) |
 
 ### 1.2. Full Setup
 
@@ -156,7 +162,14 @@ To save computational resources, the evaluation is only performed on 50 frames f
 ##### Cross-Reenactment
 Run the steps from `1.` and `2.` under self-reenactment but additionally with the `--use_cross_reenactment` flag. This requires BFM to be setup.
 
-### 3.2. Evaluation Results
+### 3.2. Ava256 Evaluation
+
+The code for reproducing the evaluations on the Ava256 is not released yet. 
+
+However, you can attempt to compare with `FlexAvatar` on the few-shot avatar creation task from `Avat3r` (row 3 in table 1 of the paper). The corresponding FlexAvatar model is released as `FLEX-2-avat3r-eval`. Furthermore, the exact specifications for input and target images for evaluation can be found in [assets/evaluation_metadata_avat3r_filtered.json](assets/evaluation_metadata_avat3r_filtered.json).
+Finally, the predicted and target images of the corresponding evaluation can be downloaded from [FLEX-2-avat3r-eval/evaluations/evaluation_avat3r.zip](https://kaldir.vc.cit.tum.de/flexavatar/models/FLEX-2-avat3r-eval/evaluations/evaluation_avat3r.zip).
+
+### 3.3. Evaluation Results
 
 The numbers slightly deviate from the paper due to the released checkpoint being different.
 
